@@ -36,3 +36,7 @@ launch.py
 *.sqlite
 
 .pytest*
+
+#
+apex/
+mmcv/
