@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y ffmpeg libsm6 libxext6 git ninja-build 
 # Install MMCV
 #RUN pip install mmcv-full==1.3.8 -f https://download.openmmlab.com/mmcv/dist/cu101/torch1.6.0/index.html
 RUN pip install albumentations==0.4.6
+RUN pip install future tensorboard
 
 # Install MMDetection
 RUN conda clean --all
