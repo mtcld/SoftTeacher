@@ -61,6 +61,44 @@ def model_inference(model, image,score_thre=0.5):
         out_pred.append(box)
     return {"labels": [model.CLASSES[l] for l in pred_labels], "scores": pred_scores.tolist(), "masks": [s.astype(np.uint8) for s in pred_segms],'bboxes':out_pred}
 
+def carpart_model_inference(model, image,score_thre=0.5):
+    result = inference_detector(model,image)
+    img_,pred_boxes,pred_segms,pred_labels,pred_scores = show_result_pyplot(model, image.copy(), result,score_thr=0.1)
+    
+    if len(pred_boxes) == 0:
+        return {'labels':[],'scores':[],'masks':[],'bboxes':[]}
+    
+    out_pred = []
+    for pred in pred_boxes:
+        box = [p for b in pred for p in b]
+        out_pred.append(box)
+    
+    index = []
+
+    for idx,label in enumerate(pred_labels):
+        if any([i in model.CLASSES[label] for i in ['door','fender','quarter_panel']]):
+            if pred_scores[idx] > 0.35:
+                index.append(True)
+            else:
+                index.append(False)
+        elif any([i in model.CLASSES[label] for i in ['front_bumper','rear_bumper']]) :
+            if pred_scores[idx] > 0.5:
+                index.append(True)
+            else:
+                index.append(False)
+        else:
+            if pred_scores[idx] > score_thre:
+                index.append(True)
+            else:
+                index.append(False)
+    
+    pred_labels = pred_labels[index]
+    out_pred = np.array(out_pred)[index].tolist()
+    pred_scores = pred_scores[index]
+    pred_segms = pred_segms[index]
+
+    return {"labels": [model.CLASSES[l] for l in pred_labels], "scores": pred_scores.tolist(), "masks": [s.astype(np.uint8) for s in pred_segms],'bboxes':out_pred}
+
 def car_model_inference(model, image):
     ## car inference 
     result = inference_detector(model,image)
@@ -115,7 +153,7 @@ def damage_model_inference_only(image):
 def get_model_prediction(image):
     out = {}
     out['car'] = car_model_inference(models['car'],image)
-    out['carpart'] = model_inference(models['carpart'],image)
+    out['carpart'] = carpart_model_inference(models['carpart'],image,0.5)
     
     return [out]
 
@@ -198,7 +236,7 @@ def draw_icon(image,start_angle,end_angle):
         start_angle = ns
         end_angle = ne
 
-    print('debug loading angle : ',start_angle,end_angle,' | ',start_angle-90,end_angle-90)
+    # print('debug loading angle : ',start_angle,end_angle,' | ',start_angle-90,end_angle-90)
     image = cv2.ellipse(image,center,(radius,radius),0,start_angle-90,end_angle-90,(255,255,0),-1)
 
     return image
@@ -263,9 +301,15 @@ def convert_view_to_bin(view_json,bin_length):
             bin_dict[bin].extend(info)
 
     for bin,info in bin_dict.items():
-        bin_dict[bin] = info[len(info)//2]
+        if len(info)//3 != 2*len(info)//3:
+            bin_dict[bin] = [info[len(info)//3],info[2*len(info)//3]]
+        else:
+            bin_dict[bin] = [info[len(info)//2]]
 
     return bin_dict
+
+def get_label(label):
+    return label[:label.find('+')]
 
 def main():
     
@@ -280,10 +324,13 @@ def main():
     damage = Scratch(damage)
 
     damage_clrs = {'scratch':np.array([255,0,0]),'dent':np.array([0,255,0]),'crack':np.array([0,0,255])} 
+    track_carpart_flag  = {'rbu_rear_bumper':False,'fbu_front_bumper':False}
 
     # video_files = glob.glob('video/video_2/*.MOV')
-    video_files=['video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV']
-    # video_files = glob.glob('video/IMG_5424.MOV')
+    video_files=['video/IMG_5424.MOV','video/20220504_142734.mp4','video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
+    # video_files = glob.glob('video/IMG_5946.MOV')
+    # video_files = ['video_tool/demo_2.avi']
+    # video_files = glob.glob('video_tool/demo.avi')
     out_path = 'video_out'
     for file in video_files:
         # cap = cv2.VideoCapture('video/VID_20220709_122339.mp4')
@@ -293,12 +340,14 @@ def main():
         name = name[:name.rfind('.')]
 
         images_video_path = out_path+'/'+name+'_bin_'+str(bin_length)
+        os.system('rm -rf '+images_video_path)
         Path(images_video_path).mkdir(parents=True,exist_ok=True)
 
         cap = cv2.VideoCapture(file)
         frame_w = int(cap.get(3))
         frame_h = int(cap.get(4))
-        # video_writer = cv2.VideoWriter(out_path+'/'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),24,(frame_w,frame_h)) 
+        video_writer = cv2.VideoWriter('video_tool/'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),4,(frame_w,frame_h))
+        # video_writer = cv2.VideoWriter('video_tool/demo_2.avi',cv2.VideoWriter_fourcc('M','J','P','G'),24,(frame_w,frame_h)) 
         count = 0
         views = EMA(span=15)
 
@@ -313,23 +362,39 @@ def main():
         hungarian = Hungarian(frame_w,frame_h)
         tracking_flag = False
         roi_list = []
-
+        # sucess_tracking_flag = True
         while cap.isOpened():
             ret, frame = cap.read()
             
             if ret == True :             
                 if count % 1 == 0:
-
+                    draw_frame = frame.copy()
+                    check_relabel_flag = False
                     tracking_info = []
                     if tracking_flag:
                         for roi_data in roi_list:
                             dst = estimate_position(pre_frame,frame,roi_data[1])
+                            
+                            if dst is None:
+                                # if sucess_tracking_flag:
+                                #     dst = roi_data[1]
+                                # else:
+                                #     sucess_tracking_flag = False
+                                continue
 
                             roi_info = [roi_data[0],np.array(dst).reshape(-1,2).tolist(),roi_data[2]]
                             tracking_info.append(roi_info)
+
+                            #draw tracking info
+                            p1 = np.int32(dst)[2][0]
+                            p2 = np.int32(dst)[0][0]
+                            cv2.rectangle(draw_frame,p1,p2,(255,0,0),2)
+                            #cv2.polylines(draw_frame,[np.int32(dst)],True,[255,0,0],2,cv2.LINE_AA)
+                            
+                            cv2.putText(draw_frame,roi_data[0],(p1[0]-130,p1[1]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(255,0,0),thickness=2)
                         
                         pre_frame = frame.copy()
-                        if  count % 4 == 0:
+                        if  count % 3 == 0:
                             tracking_flag = False
                     
                     if not tracking_flag :
@@ -342,24 +407,47 @@ def main():
                         result = carpart_if.add_carpart_info(['krug/'],result)
 
                         roi_list = []
-
-                        for idx,b in enumerate(result[0]['carpart']['boxes']):
-                            if any([i in result[0]['carpart']['labels'][idx] for i in ['door','fender','quarter_panel']]):
+                        tmp_track_carpart_flag  = {'rbu_rear_bumper':False,'fbu_front_bumper':False}
+                        for idx,b in enumerate(result[0]['carpart']['bboxes']):
+                            label_carpart = get_label(result[0]['carpart']['labels'][idx])
+                            if any([i in label_carpart for i in ['door','fender','quarter_panel']]):
+                                # if tmp_track_carpart_flag[label_carpart] and track_carpart_flag[label_carpart]:
                                 roi = [[int(b[0]),int(b[1])],[int(b[2]),int(b[1])],[int(b[2]),int(b[3])],[int(b[0]),int(b[3])]]
                                 roi_list.append([result[0]['carpart']['labels'][idx],roi,idx])
                                 tracking_flag = True
+
+                                #draw detection info
+                                cv2.rectangle(draw_frame,(b[0],b[1]),(b[2],b[3]),(0,0,255),2)
+                                # score = round(result[0]['carpart']['scores'][idx],2)
+                                cv2.putText(draw_frame,result[0]['carpart']['labels'][idx],(b[0],b[3]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(0,0,255),thickness=2)
+                            elif any([i in label_carpart for i in ['front_bumper','rear_bumper']]):
+                                tmp_track_carpart_flag[label_carpart] = True
+
+                                if tmp_track_carpart_flag[label_carpart] and track_carpart_flag[label_carpart]:
+                                    roi = [[int(b[0]),int(b[1])],[int(b[2]),int(b[1])],[int(b[2]),int(b[3])],[int(b[0]),int(b[3])]]
+                                    roi_list.append([result[0]['carpart']['labels'][idx],roi,idx])
+                                    tracking_flag = True
+
+                                    #draw detection info
+                                    cv2.rectangle(draw_frame,(b[0],b[1]),(b[2],b[3]),(0,0,255),2)
+                                    # score = round(result[0]['carpart']['scores'][idx],2)
+                                    cv2.putText(draw_frame,result[0]['carpart']['labels'][idx],(b[0],b[3]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(0,0,255),thickness=2)
+                        
+                        track_carpart_flag = tmp_track_carpart_flag.copy()
                         
                         pre_frame = frame.copy()
 
-                        roi_list, result = hungarian.bipartite_matching(tracking_info,roi_list,result)
+                        roi_list, result, check_relabel_flag = hungarian.bipartite_matching(tracking_info,roi_list,result)
 
                         
-                        # print('debug v:',v)
+                        # print('debug v:',result[0]['carpart']['view'])
                         if result[0]['carpart']['view'] is None:
-                            # print('alo')
+                            print('alo')
                             continue
-
+                        
+                        
                         v = views.add(result[0]['carpart']['view'])
+                        print('view : ',v)
                         v = int(v)
                         curr_v = v
                         if count == 0:
@@ -421,8 +509,16 @@ def main():
                     # frame = cv2.putText(frame,str(result[0]['carpart']['view'])+ ' | '+str(v),(main_car[0],main_car[1]),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
 
                     # cv2.imwrite('debug_icon.jpg',icon)
-                    # cv2.imwrite('debug_view.jpg',frame)
-                    # video_writer.write(frame)
+                    cv2.imwrite('video_tool/debug_view.jpg',draw_frame)
+
+                    
+                    if check_relabel_flag : 
+                        cv2.putText(draw_frame,'relabel',(30,30),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(0,0,255),thickness=2)
+                        video_writer.write(draw_frame)
+                    if check_relabel_flag:
+                        video_writer.write(frame)
+                    
+                    video_writer.write(draw_frame)
                 
                 count += 1
             else:
@@ -431,16 +527,49 @@ def main():
         bin_dict = convert_view_to_bin(view_dict,bin_length)
         del view_dict
         print('bin_length : ',bin_length)
-        ### run damages inference 
-        for bin, info in bin_dict.items():
-            print(bin, ' : ',info['view'])
-            result = info['result']
-            cv2.imwrite(images_video_path+'/'+'bin_'+str(bin)+'_frame_'+str(info['view'])+'.jpg',info['frame'])
-            result = damage_model_inference(dent_model,result,info['frame'],score_thre=0.35)
-            result = damage_model_inference(scratch_model,result,info['frame'],score_thre=0.6)
 
-            pred_result,damage_result = compare_masks(info['frame'],damage,result[0])
-            damaged_by_bin[bin] = damage_result
+        Path(images_video_path+'/output').mkdir(parents=True,exist_ok=True)
+        ### run damages inference 
+        for bin, infos in bin_dict.items():
+            for idx,info in enumerate(infos) : 
+                print(bin, ' : ',info['view'])
+                result = info['result']
+                image_out_name = 'bin_'+str(bin)+'_'+str(idx)+'_frame_'+str(info['view'])+'.jpg'
+                cv2.imwrite(images_video_path+'/'+image_out_name,info['frame'])
+                result = damage_model_inference(dent_model,result,info['frame'],score_thre=0.35)
+                result = damage_model_inference(scratch_model,result,info['frame'],score_thre=0.6)
+
+                pred_result,damage_result = compare_masks(info['frame'],damage,result[0])
+
+                # draw output
+                # draw carpart 
+                output_image = info['frame'].copy()
+                for idb,box in enumerate(result[0]['carpart']['bboxes']):
+                    # print('some scratch')
+                    # if 'door' in result[0]['carpart']['labels'][idb]:
+                    #     mask = result[0]['carpart']['masks'][idb].astype(bool)
+                    #     output_image[mask] = output_image[mask]*0.5+np.array([255,0,0])*0.5
+                        
+                    cv2.rectangle(output_image,(box[0],box[1]),(box[2],box[3]),(255,0,0),2)
+                    cv2.putText(output_image,result[0]['carpart']['labels'][idb],(box[0],box[3]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(255,0,0),thickness=2)
+                
+                for idm,mask in enumerate(pred_result['scratch']['masks']):
+                    # print('some scratch')
+                    mask = mask.astype(bool)
+                    output_image[mask] = output_image[mask]*0.5+damage_clrs['scratch']*0.5
+                    # b = pred_result['scratch']['bboxes'][idm]
+                    # print(b,damage_clrs['scratch'])
+                    # cv2.rectangle(output_image,(b[0],b[1]),(b[2],b[3]),(255,0,0),2)
+                
+                for mask in pred_result['dent']['masks']:
+                    # print('some dent')
+                    mask = mask.astype(bool)
+                    output_image[mask] = output_image[mask]*0.5+damage_clrs['dent']*0.5
+                
+                cv2.imwrite(images_video_path+'/output/'+image_out_name,output_image)
+
+                
+                damaged_by_bin[str(bin)+'_'+str(idx)] = damage_result
 
             # print('view : ',info['view'])
         # cleaned_damaged_by_bin = clean_outlier(damaged_by_bin,bin_length)
@@ -448,7 +577,7 @@ def main():
         final_result = collect_final_result(damaged_by_bin)
         print(final_result)
 
-        with open(out_path+'/'+name+'_damges_by_frame.json', 'w', encoding='utf-8') as f:
+        with open(out_path+'/'+name+'_damges_by_frame_v2.json', 'w', encoding='utf-8') as f:
             json.dump({'damaged_bin':cleaned_damaged_by_bin,'result':final_result}, f, ensure_ascii=False, indent=4)
         # with open(out_path+'/'+name+'_damges_by_frame.json', 'w', encoding='utf-8') as f:
         #     json.dump({'origin':damaged_by_bin,'cleaned':cleaned_damaged_by_bin}, f, ensure_ascii=False, indent=4)

@@ -1,6 +1,7 @@
 from scipy.optimize import linear_sum_assignment
 import torch 
 import numpy as np
+import json
 
 def iou_loss(boxes1: torch.Tensor,boxes2: torch.Tensor):
 
@@ -57,14 +58,21 @@ class Hungarian():
     def __init__(self,w,h):
         self.W = w
         self.H = h
+        self.count_frame = 0
+        self.cache = {}
 
     def normalize(self,box):
         xyxy = np.array([box[0],box[2]]).reshape(-1)
         box = [xyxy[0]/self.W,xyxy[1]/self.H,xyxy[2]/self.W,xyxy[3]/self.H]
         return torch.tensor(box)
     
+    def get_label_carpart(self,label):
+        return label[:label.find('+')]
+    
     def bipartite_matching(self,track_info, detect_info,pred_json):
         # base on tracking of previous frame + detect of current frame -> relabel current detection -> output new roi list and pred_json
+        self.count_frame += 1
+
         track_labels = []
         track_boxes = []
 
@@ -81,6 +89,9 @@ class Hungarian():
             detect_boxes.append(self.normalize(box))
             detect_ind.append(idx)
         
+        if len(detect_boxes) == 0 or len(track_boxes) == 0:
+            return detect_info, pred_json, False
+        
         cost_global = []
         
         for idx,dbox in enumerate(detect_boxes):
@@ -96,17 +107,40 @@ class Hungarian():
 
         row_ind,col_ind = linear_sum_assignment(cost_global)
 
+        check_relabel_flag = False
+
+        if self.count_frame > 300 and self.count_frame < 420: 
+            check_relabel_flag = True
+
         for r,c in zip(row_ind,col_ind):
             if r >= len(detect_labels) or c >= len(track_labels):
                 continue
             
-            if cost_global[r,c] < 0.45:
+            if cost_global[r,c] < 0.5:
+                if self.get_label_carpart(detect_info[r][0]) != self.get_label_carpart(track_labels[c]) and cost_global[r,c] > 0.38 :
+                    continue
+
+                if detect_labels[r] == track_labels[c]:
+                    continue
+                
+                cache_label = detect_labels[r]+'/'+track_labels[c]
+                if cache_label not in self.cache.keys():    
+                    self.cache[cache_label] = [self.count_frame]
+                else:
+                    self.cache[cache_label].append(self.count_frame) 
+
+                with open('cache-data.json', 'w', encoding='utf-8') as f:
+                    json.dump(self.cache, f, ensure_ascii=False, indent=4)
+
                 detect_info[r][0] = track_labels[c]
                 pred_json[0]['carpart']['labels'][detect_ind[r]] = track_labels[c]
+
+                # check_relabel_flag = True
+
                 print('relabel : ',detect_labels[r], track_labels[c],cost_global[r][c])
 
                 # print('debug pred_json : ',pred_json[0]['carpart']['labels'][detect_ind[r]])
 
-        return detect_info, pred_json
+        return detect_info, pred_json, check_relabel_flag
     
     
