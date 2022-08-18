@@ -324,17 +324,18 @@ def main():
     damage = Scratch(damage)
 
     damage_clrs = {'scratch':np.array([255,0,0]),'dent':np.array([0,255,0]),'crack':np.array([0,0,255])} 
-    track_carpart_flag  = {'rbu_rear_bumper':False,'fbu_front_bumper':False}
+    track_carpart_flag  = {'rbu_rear_bumper':False,'fbu_front_bumper':False,'mirror':False}
 
     # video_files = glob.glob('video/video_2/*.MOV')
-    video_files=['video/IMG_5424.MOV','video/20220504_142734.mp4','video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
+    # video_files=['video/IMG_5424.MOV','video/20220504_142734.mp4','video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
     # video_files = glob.glob('video/IMG_5946.MOV')
-    # video_files = ['video_tool/demo_2.avi']
+    video_files = ['video_tool/demo_4.avi']
     # video_files = glob.glob('video_tool/demo.avi')
     out_path = 'video_out'
     for file in video_files:
         # cap = cv2.VideoCapture('video/VID_20220709_122339.mp4')
-        view_dict = {}
+        view_dict_by_id = {}
+        view_id = 0
 
         name = os.path.basename(file)
         name = name[:name.rfind('.')]
@@ -346,8 +347,8 @@ def main():
         cap = cv2.VideoCapture(file)
         frame_w = int(cap.get(3))
         frame_h = int(cap.get(4))
-        video_writer = cv2.VideoWriter('video_tool/'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),4,(frame_w,frame_h))
-        # video_writer = cv2.VideoWriter('video_tool/demo_2.avi',cv2.VideoWriter_fourcc('M','J','P','G'),24,(frame_w,frame_h)) 
+        # video_writer = cv2.VideoWriter('video_tool/'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),4,(frame_w,frame_h))
+        # video_writer = cv2.VideoWriter('video_tool/demo_4.avi',cv2.VideoWriter_fourcc('M','J','P','G'),24,(frame_w,frame_h)) 
         count = 0
         views = EMA(span=15)
 
@@ -363,6 +364,8 @@ def main():
         tracking_flag = False
         roi_list = []
         # sucess_tracking_flag = True
+        record_flag = False
+        
         while cap.isOpened():
             ret, frame = cap.read()
             
@@ -407,7 +410,7 @@ def main():
                         result = carpart_if.add_carpart_info(['krug/'],result)
 
                         roi_list = []
-                        tmp_track_carpart_flag  = {'rbu_rear_bumper':False,'fbu_front_bumper':False}
+                        tmp_track_carpart_flag  = {'rbu_rear_bumper':False,'fbu_front_bumper':False,'mirror':False}
                         for idx,b in enumerate(result[0]['carpart']['bboxes']):
                             label_carpart = get_label(result[0]['carpart']['labels'][idx])
                             if any([i in label_carpart for i in ['door','fender','quarter_panel']]):
@@ -420,7 +423,7 @@ def main():
                                 cv2.rectangle(draw_frame,(b[0],b[1]),(b[2],b[3]),(0,0,255),2)
                                 # score = round(result[0]['carpart']['scores'][idx],2)
                                 cv2.putText(draw_frame,result[0]['carpart']['labels'][idx],(b[0],b[3]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(0,0,255),thickness=2)
-                            elif any([i in label_carpart for i in ['front_bumper','rear_bumper']]):
+                            elif any([i in label_carpart for i in ['front_bumper','rear_bumper','mirror']]):
                                 tmp_track_carpart_flag[label_carpart] = True
 
                                 if tmp_track_carpart_flag[label_carpart] and track_carpart_flag[label_carpart]:
@@ -437,31 +440,37 @@ def main():
                         
                         pre_frame = frame.copy()
 
-                        roi_list, result, check_relabel_flag = hungarian.bipartite_matching(tracking_info,roi_list,result)
-
-                        
                         # print('debug v:',result[0]['carpart']['view'])
                         if result[0]['carpart']['view'] is None:
                             print('alo')
                             continue
                         
+                        roi_list, result, check_relabel_flag,view_dict_by_id = hungarian.bipartite_matching(tracking_info,roi_list,result,view_dict_by_id,view_id,name)
                         
                         v = views.add(result[0]['carpart']['view'])
-                        print('view : ',v)
+                        print('view : ',v,count)
                         v = int(v)
+
+                        if v <5: 
+                            record_flag = True
                         curr_v = v
                         if count == 0:
                             pre_v = v
 
-                        icon = draw_icon(icon,pre_v,curr_v)
-                        pre_v = curr_v
+                        # icon = draw_icon(icon,pre_v,curr_v)
+                        # pre_v = curr_v
 
                         view_info = {'view': v,'frame':frame,'result':result}
+                        view_dict_by_id[view_id] = view_info
+                        view_id += 1
 
-                        if v not in view_dict.keys():
-                            view_dict[v] = [view_info]
-                        else:
-                            view_dict[v].append(view_info)
+                        # if v not in view_dict.keys():
+                        #     view_dict[v] = [view_info]
+                        # else:
+                        #     view_dict[v].append(view_info)
+                    
+                    # if record_flag :
+                    #     video_writer.write(frame)
 
                     # if curr_v // bin_length not in damages_by_frame.keys() :
                         # result = damage_model_inference(dent_model,result,frame,score_thre=0.35)
@@ -512,17 +521,29 @@ def main():
                     cv2.imwrite('video_tool/debug_view.jpg',draw_frame)
 
                     
-                    if check_relabel_flag : 
-                        cv2.putText(draw_frame,'relabel',(30,30),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(0,0,255),thickness=2)
-                        video_writer.write(draw_frame)
-                    if check_relabel_flag:
-                        video_writer.write(frame)
+                    # if check_relabel_flag : 
+                    #     cv2.putText(draw_frame,'relabel',(30,30),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(0,0,255),thickness=2)
+                    #     video_writer.write(draw_frame)
+                    # if check_relabel_flag:
+                    #     video_writer.write(frame)
+                    # if count < 120:
+                    #     video_writer.write(frame)
                     
-                    video_writer.write(draw_frame)
+                    # video_writer.write(draw_frame)
                 
                 count += 1
             else:
                 break
+        view_dict = {}
+
+        for view_id, view_info in view_dict_by_id.items():
+            v = view_info['view']
+            if v not in view_dict.keys():
+                view_dict[v] = [view_info]
+            else:
+                view_dict[v].append(view_info)
+
+        del view_dict_by_id
         
         bin_dict = convert_view_to_bin(view_dict,bin_length)
         del view_dict

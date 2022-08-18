@@ -60,6 +60,8 @@ class Hungarian():
         self.H = h
         self.count_frame = 0
         self.cache = {}
+        self.history = {}
+        self.threshold = 9
 
     def normalize(self,box):
         xyxy = np.array([box[0],box[2]]).reshape(-1)
@@ -69,16 +71,18 @@ class Hungarian():
     def get_label_carpart(self,label):
         return label[:label.find('+')]
     
-    def bipartite_matching(self,track_info, detect_info,pred_json):
+    def bipartite_matching(self,track_info, detect_info,pred_json,view_dict,view_id,file_name):
         # base on tracking of previous frame + detect of current frame -> relabel current detection -> output new roi list and pred_json
         self.count_frame += 1
 
         track_labels = []
         track_boxes = []
+        track_ind = []
 
         for label,box,idx in track_info:
             track_labels.append(label)
             track_boxes.append(self.normalize(box))
+            track_ind.append(idx)
         
         detect_labels = []
         detect_boxes = []
@@ -90,7 +94,7 @@ class Hungarian():
             detect_ind.append(idx)
         
         if len(detect_boxes) == 0 or len(track_boxes) == 0:
-            return detect_info, pred_json, False
+            return detect_info, pred_json, False, view_dict
         
         cost_global = []
         
@@ -125,15 +129,48 @@ class Hungarian():
                 
                 cache_label = detect_labels[r]+'/'+track_labels[c]
                 if cache_label not in self.cache.keys():    
-                    self.cache[cache_label] = [self.count_frame]
+                    self.cache[cache_label] = [self.count_frame,1]
                 else:
-                    self.cache[cache_label].append(self.count_frame) 
+                    if self.count_frame - self.cache[cache_label][0] == 1:
+                        # self.cache[cache_label]=[self.count_frame,self.cache[cache_label][1]+1]
+                        self.cache[cache_label][0] = self.count_frame
+                        self.cache[cache_label].insert(1,self.cache[cache_label][1]+1)
+                    else:
+                        # self.cache[cache_label]=[self.count_frame,1]
+                        self.cache[cache_label][0] = self.count_frame
+                        self.cache[cache_label].insert(1,1)
 
-                with open('cache-data.json', 'w', encoding='utf-8') as f:
-                    json.dump(self.cache, f, ensure_ascii=False, indent=4)
+                # with open('video_tool/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
+                #     json.dump(self.cache, f, ensure_ascii=False, indent=4)
+                
+                if self.cache[cache_label][1] >= self.threshold :
+                    # modify view_dict to reverse change
+                    # try to reserver all the wrong label cause by wrong tracking infomation
+                    for i in range(1,self.threshold):
+                        curr_id = view_id - i
+                        # print('trying to reverse .........')
+                        # rc = 
+                        for rc in self.history[curr_id]:
+                            if view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] == track_labels[c]:
+                                # print('cache : ',cache_label)
+                                # print('record :',rc['detect'],rc['track'])
+                                # print('cur label : ',view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']])
+                                view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] = detect_labels[r]
+                                origin_id = rc['index_track']
+                    
+                    # relabel the root of wrong tracking problem (todo)
+                    view_dict[curr_id-1]['result'][0]['carpart']['labels'][origin_id] = detect_labels[r]
+                    continue
 
                 detect_info[r][0] = track_labels[c]
                 pred_json[0]['carpart']['labels'][detect_ind[r]] = track_labels[c]
+
+                record = {'index_detect':detect_ind[r],'detect':detect_labels[r],'index_track':track_ind[c],'track':track_labels[c]}
+
+                if view_id not in self.history.keys():
+                    self.history[view_id] = [record]
+                else:
+                    self.history[view_id].append(record)
 
                 # check_relabel_flag = True
 
@@ -141,6 +178,6 @@ class Hungarian():
 
                 # print('debug pred_json : ',pred_json[0]['carpart']['labels'][detect_ind[r]])
 
-        return detect_info, pred_json, check_relabel_flag
+        return detect_info, pred_json, check_relabel_flag, view_dict
     
     
