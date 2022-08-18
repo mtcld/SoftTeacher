@@ -12,8 +12,13 @@ inside_part={'fbu_front_bumper':['grille','flp_front_license_plate','fli_fog_lig
             'qpa_quarter_panel':['fuel_tank_door','window'],'tail_gate':['rwi_rear_windshield',],'fender':['sli_side_turn_light'],'mirror':['sli_side_turn_light']}
 
 
-correct_masks_labels=[{'target':'grille','bg':['license_plate','hood']},{'target':'fbu_front_bumper','bg':['license_plate','grille','fog_light_bezel']},{'target':'tail_gate','bg':['rwi_rear_windshield']}]
-
+# correct_masks_labels=[{'target':'grille','bg':['license_plate','hood']},{'target':'fbu_front_bumper','bg':['license_plate','grille','fog_light_bezel']},{'target':'tail_gate','bg':['rwi_rear_windshield']}]
+correct_masks_labels=[{'target':'grille','bg':['flp_front_license_plate','hood']},\
+{'target':'fbu_front_bumper','bg':['flp_front_license_plate','grille','fog_light_bezel','fli_fog_light']},\
+{'target':'tail_gate','bg':['rwi_rear_windshield']},\
+{'target':'hood','bg':['fender']},\
+{'target':'fender','bg':['fbu_front_bumper']},\
+{'target':'door','bg':['mirror','window','handle']}]
 no_side_carpart=['hood','grille','tail_gate']
 
 def keep_no_side_carpart(labels,masks,scores,bboxes):
@@ -71,7 +76,7 @@ def correct_masks(labels,masks,correct_masks_label):
     if len(fr_masks) ==0:
         return labels,masks
     backgrounds = [mask for i,mask in enumerate(masks) if labels[i] in correct_masks_label['bg']]
-    
+    # print(correct_masks_label['target'],correct_masks_label['bg'])
     if len(backgrounds) > 0:
         bg_mask =backgrounds[0]
         bg_mask = bg_mask.astype(np.uint8)
@@ -170,6 +175,7 @@ def merge_carpart(labels,masks,scores,bboxes):
     #                 break        
 
 def filter_overlap_carpart(labels,masks,scores,bboxes):
+    # print('debug filter car part: *********************************')
     for i in range(len(labels)-1,0,-1):
         for j in range(i - 1, -1, -1):
             if (labels[i] in inside_part and  labels[j]  in inside_part[labels[i]])\
@@ -340,8 +346,10 @@ def filter_by_missing(pred_json):
     
 def filter_carpart(pred_json):
     carpart_pred=pred_json['carpart']
+    # print('debug filter carpart ***')
 
     for correct_masks_label in correct_masks_labels:
+        # print('debug : ',correct_masks_label)
         correct_masks(carpart_pred['labels'],carpart_pred['masks'],correct_masks_label)
     carpart_pred['labels']=correct_font_back_labels(carpart_pred['labels'],carpart_pred['masks'])
     merge_carpart(carpart_pred['labels'],carpart_pred['masks'],carpart_pred['scores'],carpart_pred['bboxes'])
