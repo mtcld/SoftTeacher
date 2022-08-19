@@ -61,7 +61,7 @@ class Hungarian():
         self.count_frame = 0
         self.cache = {}
         self.history = {}
-        self.threshold = 9
+        self.threshold = 8
 
     def normalize(self,box):
         xyxy = np.array([box[0],box[2]]).reshape(-1)
@@ -113,8 +113,8 @@ class Hungarian():
 
         check_relabel_flag = False
 
-        if self.count_frame > 300 and self.count_frame < 420: 
-            check_relabel_flag = True
+        # if self.count_frame > 300 and self.count_frame < 420: 
+        #     check_relabel_flag = True
 
         for r,c in zip(row_ind,col_ind):
             if r >= len(detect_labels) or c >= len(track_labels):
@@ -148,7 +148,7 @@ class Hungarian():
                     # try to reserver all the wrong label cause by wrong tracking infomation
                     for i in range(1,self.threshold):
                         curr_id = view_id - i
-                        # print('trying to reverse .........')
+                        print('trying to reverse .........',curr_id)
                         # rc = 
                         for rc in self.history[curr_id]:
                             if view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] == track_labels[c]:
@@ -158,8 +158,13 @@ class Hungarian():
                                 view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] = detect_labels[r]
                                 origin_id = rc['index_track']
                     
-                    # relabel the root of wrong tracking problem (todo)
+                    # relabel the root of wrong tracking problem
                     view_dict[curr_id-1]['result'][0]['carpart']['labels'][origin_id] = detect_labels[r]
+
+                    # reset cache 
+                    # self.cache[cache_label]=[self.count_frame,1]
+                    self.cache[cache_label][0] = self.count_frame
+                    self.cache[cache_label].insert(1,1)
                     continue
 
                 detect_info[r][0] = track_labels[c]
@@ -172,7 +177,10 @@ class Hungarian():
                 else:
                     self.history[view_id].append(record)
 
-                # check_relabel_flag = True
+                # with open('video_tool/history-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
+                #     json.dump(self.history, f, ensure_ascii=False, indent=4)
+
+                check_relabel_flag = True
 
                 print('relabel : ',detect_labels[r], track_labels[c],cost_global[r][c])
 
