@@ -205,9 +205,11 @@ class Hungarian():
             cost_global.append(cost_row)
         
         cost_global = np.array(cost_global)
-        cost_global = np.pad(cost_global,[(0,int(cost_global.shape[0]<cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1])),
-                                        (0,int(cost_global.shape[0]>cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1]))],
-                                        'constant',constant_values=(10,))
+
+        ## can reduce padding axis to reduce runtime
+        # cost_global = np.pad(cost_global,[(0,int(cost_global.shape[0]<cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1])),
+        #                                 (0,int(cost_global.shape[0]>cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1]))],
+        #                                 'constant',constant_values=(10,))
         
         row_ind,col_ind = linear_sum_assignment(cost_global)
 
@@ -221,6 +223,9 @@ class Hungarian():
         
         return valid
 
+    def matching_damages(self,boxes1,boxes2):
+
+        return 0
 
     
     
