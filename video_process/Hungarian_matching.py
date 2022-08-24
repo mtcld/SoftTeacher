@@ -1,3 +1,4 @@
+from xmlrpc.client import FastParser
 from scipy.optimize import linear_sum_assignment
 import torch 
 import numpy as np
@@ -187,5 +188,39 @@ class Hungarian():
                 # print('debug pred_json : ',pred_json[0]['carpart']['labels'][detect_ind[r]])
 
         return detect_info, pred_json, check_relabel_flag, view_dict
+    
+    def matching_points(self,points1,points2):
+        def normalize_point(p):
+            return torch.tensor([p[0]/self.W,p[1]/self.H])
+        
+        cost_global = []
+
+        for p1 in points1:
+            p1 = normalize_point(p1)
+            cost_row = []
+            for p2 in points2:
+                p2 = normalize_point(p2)
+                cost_row.append(l1_loss(p1,p2))
+            
+            cost_global.append(cost_row)
+        
+        cost_global = np.array(cost_global)
+        cost_global = np.pad(cost_global,[(0,int(cost_global.shape[0]<cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1])),
+                                        (0,int(cost_global.shape[0]>cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1]))],
+                                        'constant',constant_values=(10,))
+        
+        row_ind,col_ind = linear_sum_assignment(cost_global)
+
+        out_ind = col_ind[:len(points1)]
+        valid = []
+        for i in range(len(points2)):
+            if i in out_ind:
+                valid.append(True)
+            else:
+                valid.append(False)
+        
+        return valid
+
+
     
     
