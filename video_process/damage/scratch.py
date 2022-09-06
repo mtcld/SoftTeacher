@@ -54,7 +54,7 @@ class Scratch(DamageDecorator):
 
         edge_mask =carpart_info['edge_mask']
         for id_carpart,(cat,carpart_mask) in enumerate(zip(carpart_info['labels'], carpart_info["masks"])):
-            max_score = 0
+            # max_score = 0
             dam='scratch'
             if not is_eligible_damage_on_part(cat, dam):
                 continue
@@ -85,8 +85,9 @@ class Scratch(DamageDecorator):
                         continue
                     # if damage_pixel / max(cv2.countNonZero(pred_damage),cv2.countNonZero(carpart_mask)) > 0.75:
                     #     dam='missing
-
-                    damage_score = (dam, score_list[kn],kn,id_carpart)
+                    
+                    # note : (damage name,score,damage id, car part id, cross check)
+                    damage_score = [dam, score_list[kn],kn,id_carpart,False]
                     if cat not in final_output.keys():
                         final_output[cat] = []
                         final_output[cat].append(damage_score)

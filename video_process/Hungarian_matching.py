@@ -62,7 +62,7 @@ class Hungarian():
         self.count_frame = 0
         self.cache = {}
         self.history = {}
-        self.threshold = 8
+        self.threshold = 6
 
     def normalize(self,box):
         xyxy = np.array([box[0],box[2]]).reshape(-1)
@@ -141,8 +141,8 @@ class Hungarian():
                         self.cache[cache_label][0] = self.count_frame
                         self.cache[cache_label].insert(1,1)
 
-                # with open('video_tool/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
-                #     json.dump(self.cache, f, ensure_ascii=False, indent=4)
+                with open('video_tool/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
+                    json.dump(self.cache, f, ensure_ascii=False, indent=4)
                 
                 if self.cache[cache_label][1] >= self.threshold :
                     # modify view_dict to reverse change
@@ -223,9 +223,40 @@ class Hungarian():
         
         return valid
 
-    def matching_damages(self,boxes1,boxes2):
+    def matching_damages(self,carpart_label,boxes1,ind_list1,coord_list1,info1,boxes2,ind_list2,coord_list2,info2):
+        def normalize_box(box):
+            box = [box[0]/self.W,box[1]/self.H,box[2]/self.W,box[3]/self.H]
+            return torch.tensor(box)
+        
+        cost_global = []
+        for b1 in boxes1:
+            b1 = normalize_box(b1)
+            cost_row = []
+            for b2 in boxes2:
+                b2 = normalize_box(b2)
+                cost_row.append(l1_loss(b1,b2))
+            cost_global.append(cost_row)
 
-        return 0
+        cost_global = np.array(cost_global)
+
+        cost_global = np.pad(cost_global,[(0,int(cost_global.shape[0]<cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1])),
+                                        (0,int(cost_global.shape[0]>cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1]))],
+                                        'constant',constant_values=(10,))
+        
+        row_ind,col_ind = linear_sum_assignment(cost_global)
+        print(cost_global)
+
+        for r,c in zip(row_ind,col_ind):
+            if r >= len(boxes1) or c >= len(boxes2):
+                continue
+            
+            if cost_global[r,c] < 0.1 and abs(coord_list1[r] - coord_list2[c]) <= 1:
+                print('pair : ',r,c)
+                info1['damage_result'][carpart_label][ind_list1[r]][4] = True
+                info2['damage_result'][carpart_label][ind_list2[c]][4] = True
+
+
+        return info1, info2
 
     
     
