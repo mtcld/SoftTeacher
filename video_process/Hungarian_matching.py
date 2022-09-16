@@ -1,3 +1,4 @@
+from turtle import Turtle
 from xmlrpc.client import FastParser
 from scipy.optimize import linear_sum_assignment
 import torch 
@@ -141,8 +142,8 @@ class Hungarian():
                         self.cache[cache_label][0] = self.count_frame
                         self.cache[cache_label].insert(1,1)
 
-                with open('video_tool/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
-                    json.dump(self.cache, f, ensure_ascii=False, indent=4)
+                # with open('video_tool/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
+                #     json.dump(self.cache, f, ensure_ascii=False, indent=4)
                 
                 if self.cache[cache_label][1] >= self.threshold :
                     # modify view_dict to reverse change
@@ -223,6 +224,15 @@ class Hungarian():
         
         return valid
 
+    def check_wrong_carpart_view(self,carpart_label,view):
+        if carpart_label == 'fbu_front_bumper+f' and (view > 90 and view < 270):
+            return False
+        
+        if carpart_label == 'rbu_rear_bumper+b' and (view < 90 or view > 270):
+            return False
+
+        return True
+
     def matching_damages(self,carpart_label,boxes1,ind_list1,coord_list1,info1,boxes2,ind_list2,coord_list2,info2):
         def normalize_box(box):
             box = [box[0]/self.W,box[1]/self.H,box[2]/self.W,box[3]/self.H]
@@ -244,17 +254,25 @@ class Hungarian():
                                         'constant',constant_values=(10,))
         
         row_ind,col_ind = linear_sum_assignment(cost_global)
-        print(cost_global)
+        
+        debug_label = 'rbu_rear_bumper+b'
+
+        # if carpart_label == debug_label:
+        #     print(cost_global)
 
         for r,c in zip(row_ind,col_ind):
             if r >= len(boxes1) or c >= len(boxes2):
                 continue
-            
-            if cost_global[r,c] < 0.1 and abs(coord_list1[r] - coord_list2[c]) <= 1:
+            # print('coord : ',coord_list1[r] , coord_list2[c])
+            if cost_global[r,c] < 0.13 and abs(coord_list1[r] - coord_list2[c]) <= 1 \
+            and (self.check_wrong_carpart_view(carpart_label,info1['view']) and self.check_wrong_carpart_view(carpart_label,info2['view'])):
                 print('pair : ',r,c)
                 info1['damage_result'][carpart_label][ind_list1[r]][4] = True
                 info2['damage_result'][carpart_label][ind_list2[c]][4] = True
 
+        if carpart_label == debug_label:
+            print(info1['view'])
+            print(info2['view'])
 
         return info1, info2
 
