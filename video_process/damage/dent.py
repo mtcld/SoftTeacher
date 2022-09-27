@@ -136,7 +136,7 @@ class Dent(DamageDecorator):
             return self.component.get_damage2carpart(image,pred_json,final_output)
         pred_json=filter(image,pred_json)
         
-        for cat,carpart_mask in zip(carpart_info['labels'],carpart_info["masks"]):
+        for id_carpart,(cat,carpart_mask) in enumerate(zip(carpart_info['labels'],carpart_info["masks"])):
             carpart_area= cv2.countNonZero(carpart_mask)
             if carpart_area/(carpart_info['car_area']) <0.01:
                 continue 
@@ -158,17 +158,15 @@ class Dent(DamageDecorator):
                     if damage_pixel / min(cv2.countNonZero(pred_damage),carpart_area) < 0.17:
                         continue
                     ndamage_per_carpart +=1
-                    max_score = max(max_score, float(score_list[kn]))
+                    # max_score = max(max_score, float(score_list[kn]))
 
-            damage_score = (dam, max_score,ndamage_per_carpart)
+                    damage_score = [dam, score_list[kn],kn,id_carpart,False]
 
-
-
-            if max_score > 0:
-                if cat not in final_output.keys():
-                    final_output[cat] = []
-                    final_output[cat].append(damage_score)
-                else:
-                    final_output[cat].append(damage_score)
+                    # if max_score > 0:
+                    if cat not in final_output.keys():
+                        final_output[cat] = []
+                        final_output[cat].append(damage_score)
+                    else:
+                        final_output[cat].append(damage_score)
 
         return self.component.get_damage2carpart(image,pred_json,final_output)

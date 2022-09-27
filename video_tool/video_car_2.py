@@ -19,7 +19,8 @@ import glob
 import math as m
 from video_process.Hungarian_matching import Hungarian
 from video_process.matching import estimate_position
-
+import sys
+import pickle
 
 from mmdet.apis import init_detector, inference_detector, show_result_pyplot
 from ssod.apis.inference import init_detector as st_init_detector
@@ -35,8 +36,8 @@ car_model = init_detector('thirdparty/mmdetection/configs/cbnet/mask_rcnn_cbv2_s
 scratch_model = init_detector('checkpoint/scratch-cp-exp5-HSV-LSJ-SWA/swa-scratch-copy-paste-HSV-LSJ.py',
                         'checkpoint/scratch-cp-exp5-HSV-LSJ-SWA/best_bbox_mAP.pth',device='cuda:0')
 
-dent_model = st_init_detector('checkpoint/19_02_2022/dent/dent_mask.py',
-                        'checkpoint/19_02_2022/dent/iter_207000.pth',device='cuda:0')
+# dent_model = st_init_detector('checkpoint/19_02_2022/dent/dent_mask.py',
+#                         'checkpoint/19_02_2022/dent/iter_207000.pth',device='cuda:0')
 
 # crack_model = init_detector('checkpoint/origin_crack_cp_exp_3/copy-paste-with-crop-images.py',
 #                         'checkpoint/origin_crack_cp_exp_3/epoch_29.pth',device='cuda:2')
@@ -301,10 +302,18 @@ def convert_view_to_bin(view_json,bin_length):
             bin_dict[bin].extend(info)
 
     for bin,info in bin_dict.items():
-        if len(info)//3 != 2*len(info)//3:
-            bin_dict[bin] = [info[len(info)//3],info[2*len(info)//3]]
-        else:
-            bin_dict[bin] = [info[len(info)//2]]
+        
+        # if len(info)//3 != 2*len(info)//3:
+        #     bin_dict[bin] = [info[len(info)//3],info[2*len(info)//3]]
+        # else:
+        #     bin_dict[bin] = [info[len(info)//2]]
+
+        # ids = set([len(info)//3, 2*len(info)//3])
+        ids = set([len(info)//4, 2*len(info)//4, 3*len(info)//4])
+        export_infos = [data for id,data in enumerate(info) if id in ids]
+        bin_dict[bin] = export_infos
+        # for id in ids:
+        #     bin_dict[bin].append(info[id])
 
     return bin_dict
 
@@ -320,17 +329,18 @@ def main():
 
 
     damage = Damage()
-    damage = Dent(damage)
+    # damage = Dent(damage)
     damage = Scratch(damage)
 
     damage_clrs = {'scratch':np.array([255,0,0]),'dent':np.array([0,255,0]),'crack':np.array([0,0,255])} 
     track_carpart_flag  = {'rbu_rear_bumper':False,'fbu_front_bumper':False,'mirror':False}
 
     # video_files = glob.glob('video/video_2/*.MOV')
-    # video_files=['video/IMG_5424.MOV','video/20220504_142734.mp4','video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
+    video_files=['video/IMG_5424.MOV','video/20220504_142734.mp4','video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
     # video_files = glob.glob('video/IMG_5946.MOV')
-    video_files = ['video_tool/demo_4.avi']
-    # video_files = glob.glob('video_tool/demo.avi')
+    # video_files = ['video/IMG_5424.MOV','video/IMG_5959.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
+    # video_files = ['video/20220504_142734.mp4']
+    # video_files = glob.glob('video_tool/demo_6.avi')
     out_path = 'video_out'
     for file in video_files:
         # cap = cv2.VideoCapture('video/VID_20220709_122339.mp4')
@@ -341,14 +351,14 @@ def main():
         name = name[:name.rfind('.')]
 
         images_video_path = out_path+'/'+name+'_bin_'+str(bin_length)
-        os.system('rm -rf '+images_video_path)
+        # os.system('rm -rf '+images_video_path)
         Path(images_video_path).mkdir(parents=True,exist_ok=True)
 
         cap = cv2.VideoCapture(file)
         frame_w = int(cap.get(3))
         frame_h = int(cap.get(4))
         # video_writer = cv2.VideoWriter('video_tool/'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),4,(frame_w,frame_h))
-        # video_writer = cv2.VideoWriter('video_tool/demo_4.avi',cv2.VideoWriter_fourcc('M','J','P','G'),24,(frame_w,frame_h)) 
+        # video_writer = cv2.VideoWriter('video_tool/demo_6.avi',cv2.VideoWriter_fourcc('M','J','P','G'),24,(frame_w,frame_h)) 
         count = 0
         views = EMA(span=15)
 
@@ -447,6 +457,7 @@ def main():
                         
                         roi_list, result, check_relabel_flag,view_dict_by_id = hungarian.bipartite_matching(tracking_info,roi_list,result,view_dict_by_id,view_id,name)
                         
+                        print('debug memory usage : ',sys.getsizeof(view_dict_by_id)*1e-6,' MB')
                         v = views.add(result[0]['carpart']['view'])
                         print('view : ',v,count)
                         v = int(v)
@@ -460,7 +471,7 @@ def main():
                         # icon = draw_icon(icon,pre_v,curr_v)
                         # pre_v = curr_v
 
-                        view_info = {'view': v,'frame':frame,'result':result}
+                        view_info = {'view': v,'frame_id':count,'frame':frame,'result':result}
                         view_dict_by_id[view_id] = view_info
                         view_id += 1
 
@@ -526,7 +537,7 @@ def main():
                     #     video_writer.write(draw_frame)
                     # if check_relabel_flag:
                     #     video_writer.write(frame)
-                    # if count < 120:
+                    # if count > 200 and count < 320:
                     #     video_writer.write(frame)
                     
                     # video_writer.write(draw_frame)
@@ -534,6 +545,7 @@ def main():
                 count += 1
             else:
                 break
+
         view_dict = {}
 
         for view_id, view_info in view_dict_by_id.items():
@@ -550,15 +562,21 @@ def main():
         print('bin_length : ',bin_length)
 
         Path(images_video_path+'/output').mkdir(parents=True,exist_ok=True)
+
+        pkfile = open('video_tool/'+name+'.pickle','wb')
+        pickle.dump(bin_dict,pkfile)
+
+        continue
+
         ### run damages inference 
         for bin, infos in bin_dict.items():
             for idx,info in enumerate(infos) : 
                 print(bin, ' : ',info['view'])
                 result = info['result']
                 image_out_name = 'bin_'+str(bin)+'_'+str(idx)+'_frame_'+str(info['view'])+'.jpg'
-                cv2.imwrite(images_video_path+'/'+image_out_name,info['frame'])
-                result = damage_model_inference(dent_model,result,info['frame'],score_thre=0.35)
-                result = damage_model_inference(scratch_model,result,info['frame'],score_thre=0.6)
+                # cv2.imwrite(images_video_path+'/'+image_out_name,info['frame'])
+                # result = damage_model_inference(dent_model,result,info['frame'],score_thre=0.35)
+                result = damage_model_inference(scratch_model,result,info['frame'],score_thre=0.1)
 
                 pred_result,damage_result = compare_masks(info['frame'],damage,result[0])
 
@@ -582,12 +600,12 @@ def main():
                     # print(b,damage_clrs['scratch'])
                     # cv2.rectangle(output_image,(b[0],b[1]),(b[2],b[3]),(255,0,0),2)
                 
-                for mask in pred_result['dent']['masks']:
-                    # print('some dent')
-                    mask = mask.astype(bool)
-                    output_image[mask] = output_image[mask]*0.5+damage_clrs['dent']*0.5
+                # for mask in pred_result['dent']['masks']:
+                #     # print('some dent')
+                #     mask = mask.astype(bool)
+                #     output_image[mask] = output_image[mask]*0.5+damage_clrs['dent']*0.5
                 
-                cv2.imwrite(images_video_path+'/output/'+image_out_name,output_image)
+                # cv2.imwrite(images_video_path+'/output/'+image_out_name,output_image)
 
                 
                 damaged_by_bin[str(bin)+'_'+str(idx)] = damage_result
@@ -598,8 +616,12 @@ def main():
         final_result = collect_final_result(damaged_by_bin)
         print(final_result)
 
+        # save final result
         with open(out_path+'/'+name+'_damges_by_frame_v2.json', 'w', encoding='utf-8') as f:
             json.dump({'damaged_bin':cleaned_damaged_by_bin,'result':final_result}, f, ensure_ascii=False, indent=4)
+        
+        
+        
         # with open(out_path+'/'+name+'_damges_by_frame.json', 'w', encoding='utf-8') as f:
         #     json.dump({'origin':damaged_by_bin,'cleaned':cleaned_damaged_by_bin}, f, ensure_ascii=False, indent=4)
 
