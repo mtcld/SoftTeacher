@@ -1,6 +1,6 @@
 # from video_process.car.view import Car_View
-import enum
-from typing import Tuple
+# import enum
+# from typing import Tuple
 from video_process.carpart.segment import CarpartInfo
 from video_process.damage import Damage
 from video_process.damage.scratch import Scratch
@@ -18,6 +18,8 @@ import os
 import glob
 import math as m
 from video_process.Hungarian_matching import Hungarian
+from video_process.Cross_checking import Cross_check_pair
+from video_process.EMA import EMA
 from video_process.matching import estimate_position
 import sys
 import pickle
@@ -36,8 +38,8 @@ car_model = init_detector('thirdparty/mmdetection/configs/cbnet/mask_rcnn_cbv2_s
 scratch_model = init_detector('checkpoint/scratch-cp-exp5-HSV-LSJ-SWA/swa-scratch-copy-paste-HSV-LSJ.py',
                         'checkpoint/scratch-cp-exp5-HSV-LSJ-SWA/best_bbox_mAP.pth',device='cuda:0')
 
-# dent_model = st_init_detector('checkpoint/19_02_2022/dent/dent_mask.py',
-#                         'checkpoint/19_02_2022/dent/iter_207000.pth',device='cuda:0')
+dent_model = st_init_detector('checkpoint/19_02_2022/dent/dent_mask.py',
+                        'checkpoint/19_02_2022/dent/iter_207000.pth',device='cuda:0')
 
 # crack_model = init_detector('checkpoint/origin_crack_cp_exp_3/copy-paste-with-crop-images.py',
 #                         'checkpoint/origin_crack_cp_exp_3/epoch_29.pth',device='cuda:2')
@@ -176,44 +178,46 @@ def compare_masks(image,damage,pred_json):
 
     return pred_json,final_output
 
-class EMA:
-    def __init__(self,values=[],span=2):
-        self.df = pd.DataFrame({'values':values})
-        self.default_span = span
-        self.current_span = span
-        self.activate_new_span = False
-        self.gap = 90
-        self.ema_list = self.df.ewm(span=self.current_span).mean()['values'].tolist()
 
-    def add(self,value):
-        value = int(value)
-        if len(self.df) == 0:
-            self.df.loc[len(self.df)] = [value]
-            self.ema_list.append(value)
-            return value
 
-        if abs(value - self.df.loc[len(self.df)-1]['values']) > self.gap:
-            self.current_span = 0
-            self.activate_new_span = True
+# class EMA:
+#     def __init__(self,values=[],span=2):
+#         self.df = pd.DataFrame({'values':values})
+#         self.default_span = span
+#         self.current_span = span
+#         self.activate_new_span = False
+#         self.gap = 90
+#         self.ema_list = self.df.ewm(span=self.current_span).mean()['values'].tolist()
 
-        self.df.loc[len(self.df)] = [value]
+#     def add(self,value):
+#         value = int(value)
+#         if len(self.df) == 0:
+#             self.df.loc[len(self.df)] = [value]
+#             self.ema_list.append(value)
+#             return value
 
-        if self.current_span < self.default_span :
-            if self.activate_new_span is True and self.current_span == 1 :
-                self.activate_new_span = False
-            else:
-                self.current_span += 1
+#         if abs(value - self.df.loc[len(self.df)-1]['values']) > self.gap:
+#             self.current_span = 0
+#             self.activate_new_span = True
 
-        ema_value = self.df.ewm(span=self.current_span).mean()['values'].tolist()[-1]
-        self.ema_list.append(ema_value)
+#         self.df.loc[len(self.df)] = [value]
+
+#         if self.current_span < self.default_span :
+#             if self.activate_new_span is True and self.current_span == 1 :
+#                 self.activate_new_span = False
+#             else:
+#                 self.current_span += 1
+
+#         ema_value = self.df.ewm(span=self.current_span).mean()['values'].tolist()[-1]
+#         self.ema_list.append(ema_value)
         
-        return ema_value 
+#         return ema_value 
     
-    def get_origin_values(self):
-        return self.df['values'].tolist()
+#     def get_origin_values(self):
+#         return self.df['values'].tolist()
     
-    def get_ema_values(self):
-        return self.ema_list
+#     def get_ema_values(self):
+#         return self.ema_list
 
 def draw_icon(image,start_angle,end_angle):
     # if start_angle > 180 : 
@@ -292,6 +296,44 @@ def collect_final_result(damaged_by_bin_json):
     
     return confirm
 
+def collect_final_result_after_cross_check(damaged_by_bin_json):
+    confirm = {}
+    confirm2 = {}
+    for id,(k,value) in enumerate(damaged_by_bin_json.items()):
+    #     print(value)
+        for cp, damages in value.items():
+            for d in damages:
+                if d[0] == 'scratch':
+                    if d[1] > 0.61 and (d[-1] or any([i in cp for i in ['mirror','rocker_panel','hood']])):
+                        label = cp+'_'+d[0]
+                        if label not in confirm:
+                            confirm[label] = 1
+                        else:
+                            confirm[label] += 1
+
+
+                    if d[1] > 0.61 :
+                        label = cp+'_'+d[0]
+                        if label not in confirm2:
+                            confirm2[label] = 1
+                        else:
+                            confirm2[label] += 1
+                else:
+                    if id % 3 == 0:
+                        continue
+                    label = cp+'_'+d[0]
+                    if label not in confirm:
+                        confirm[label] = 1
+                    else:
+                        confirm[label] += 1
+    
+    print('uncheck result  : ',len(confirm2.values()),confirm2)
+
+    for k in list(confirm.keys()):
+        if 'rocker_panel' in k and confirm[k] == 1:
+            del confirm[k]
+    return confirm
+
 def convert_view_to_bin(view_json,bin_length):
     bin_dict = {}
     for v,info in view_json.items():
@@ -328,16 +370,16 @@ def main():
     icon = cv2.circle(icon.copy(),center,radius,(255,0,0),10)
 
 
-    damage = Damage()
-    # damage = Dent(damage)
-    damage = Scratch(damage)
+    damage_filter = Damage()
+    damage_filter = Dent(damage_filter)
+    damage_filter = Scratch(damage_filter)
 
     damage_clrs = {'scratch':np.array([255,0,0]),'dent':np.array([0,255,0]),'crack':np.array([0,0,255])} 
     track_carpart_flag  = {'rbu_rear_bumper':False,'fbu_front_bumper':False,'mirror':False}
 
     # video_files = glob.glob('video/video_2/*.MOV')
-    video_files=['video/IMG_5424.MOV','video/20220504_142734.mp4','video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
-    # video_files = glob.glob('video/IMG_5946.MOV')
+    # video_files=['video/IMG_5424.MOV','video/20220504_142734.mp4','video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
+    video_files = glob.glob('video/video_test/*')
     # video_files = ['video/IMG_5424.MOV','video/IMG_5959.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
     # video_files = ['video/20220504_142734.mp4']
     # video_files = glob.glob('video_tool/demo_6.avi')
@@ -357,6 +399,8 @@ def main():
         cap = cv2.VideoCapture(file)
         frame_w = int(cap.get(3))
         frame_h = int(cap.get(4))
+
+        print('debug frame size : ',frame_w,frame_h)
         # video_writer = cv2.VideoWriter('video_tool/'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),4,(frame_w,frame_h))
         # video_writer = cv2.VideoWriter('video_tool/demo_6.avi',cv2.VideoWriter_fourcc('M','J','P','G'),24,(frame_w,frame_h)) 
         count = 0
@@ -563,62 +607,99 @@ def main():
 
         Path(images_video_path+'/output').mkdir(parents=True,exist_ok=True)
 
-        pkfile = open('video_tool/'+name+'.pickle','wb')
-        pickle.dump(bin_dict,pkfile)
+        # pkfile = open('video_tool/'+name+'.pickle','wb')
+        # pickle.dump(bin_dict,pkfile)
 
-        continue
+        # continue
+
+        flatten_list = []
+
+        for bin, infos in bin_dict.items():
+            
+            for idx,info in enumerate(infos) :
+                # print('debug id : ',idx)
+                flatten_list.append(info)
 
         ### run damages inference 
-        for bin, infos in bin_dict.items():
-            for idx,info in enumerate(infos) : 
-                print(bin, ' : ',info['view'])
-                result = info['result']
-                image_out_name = 'bin_'+str(bin)+'_'+str(idx)+'_frame_'+str(info['view'])+'.jpg'
-                # cv2.imwrite(images_video_path+'/'+image_out_name,info['frame'])
-                # result = damage_model_inference(dent_model,result,info['frame'],score_thre=0.35)
-                result = damage_model_inference(scratch_model,result,info['frame'],score_thre=0.1)
+        for id,info in enumerate(flatten_list):
+            print(bin, ' : ',info['view'])
+            result = info['result']
+            image_out_name = 'bin_'+str(bin)+'_'+str(idx)+'_frame_'+str(info['view'])+'.jpg'
+            # cv2.imwrite(images_video_path+'/'+image_out_name,info['frame'])
+            result = damage_model_inference(dent_model,result,info['frame'],score_thre=0.35)
+            result = damage_model_inference(scratch_model,result,info['frame'],score_thre=0.01)
+            
+            result, damage_result = compare_masks(info['frame'],damage_filter,result[0])
 
-                pred_result,damage_result = compare_masks(info['frame'],damage,result[0])
+            flatten_list[id]['result'] = result
+            flatten_list[id]['damage_result'] = damage_result
+            
 
-                # draw output
-                # draw carpart 
-                output_image = info['frame'].copy()
-                for idb,box in enumerate(result[0]['carpart']['bboxes']):
-                    # print('some scratch')
-                    # if 'door' in result[0]['carpart']['labels'][idb]:
-                    #     mask = result[0]['carpart']['masks'][idb].astype(bool)
-                    #     output_image[mask] = output_image[mask]*0.5+np.array([255,0,0])*0.5
-                        
-                    cv2.rectangle(output_image,(box[0],box[1]),(box[2],box[3]),(255,0,0),2)
-                    cv2.putText(output_image,result[0]['carpart']['labels'][idb],(box[0],box[3]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(255,0,0),thickness=2)
-                
-                for idm,mask in enumerate(pred_result['scratch']['masks']):
-                    # print('some scratch')
-                    mask = mask.astype(bool)
-                    output_image[mask] = output_image[mask]*0.5+damage_clrs['scratch']*0.5
-                    # b = pred_result['scratch']['bboxes'][idm]
-                    # print(b,damage_clrs['scratch'])
-                    # cv2.rectangle(output_image,(b[0],b[1]),(b[2],b[3]),(255,0,0),2)
-                
-                # for mask in pred_result['dent']['masks']:
-                #     # print('some dent')
-                #     mask = mask.astype(bool)
-                #     output_image[mask] = output_image[mask]*0.5+damage_clrs['dent']*0.5
-                
-                # cv2.imwrite(images_video_path+'/output/'+image_out_name,output_image)
+            # draw output
+            # draw carpart 
+            # output_image = info['frame'].copy()
+            # for idb,box in enumerate(result[0]['carpart']['bboxes']):
+            #     # print('some scratch')
+            #     # if 'door' in result[0]['carpart']['labels'][idb]:
+            #     #     mask = result[0]['carpart']['masks'][idb].astype(bool)
+            #     #     output_image[mask] = output_image[mask]*0.5+np.array([255,0,0])*0.5
+                    
+            #     cv2.rectangle(output_image,(box[0],box[1]),(box[2],box[3]),(255,0,0),2)
+            #     cv2.putText(output_image,result[0]['carpart']['labels'][idb],(box[0],box[3]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(255,0,0),thickness=2)
+            
+            # for idm,mask in enumerate(pred_result['scratch']['masks']):
+            #     # print('some scratch')
+            #     mask = mask.astype(bool)
+            #     output_image[mask] = output_image[mask]*0.5+damage_clrs['scratch']*0.5
+                # b = pred_result['scratch']['bboxes'][idm]
+                # print(b,damage_clrs['scratch'])
+                # cv2.rectangle(output_image,(b[0],b[1]),(b[2],b[3]),(255,0,0),2)
+            
+            # for mask in pred_result['dent']['masks']:
+            #     # print('some dent')
+            #     mask = mask.astype(bool)
+            #     output_image[mask] = output_image[mask]*0.5+damage_clrs['dent']*0.5
+            
+            # cv2.imwrite(images_video_path+'/output/'+image_out_name,output_image)
 
-                
-                damaged_by_bin[str(bin)+'_'+str(idx)] = damage_result
+            
+            # damaged_by_bin[str(bin)+'_'+str(idx)] = damage_result
 
-            # print('view : ',info['view'])
-        # cleaned_damaged_by_bin = clean_outlier(damaged_by_bin,bin_length)
-        cleaned_damaged_by_bin = damaged_by_bin
-        final_result = collect_final_result(damaged_by_bin)
+        scracth_cross_check = Cross_check_pair(hungarian)
+        print('cross check ...',name)
+        for id in range(len(flatten_list)):
+            # if id not in range(31,52+1):
+            #     continue
+
+            if not bool(flatten_list[id]['damage_result']):
+                continue
+
+            id_next = id + 1
+            
+            for idx in range(id_next,len(flatten_list)):
+                if not bool(flatten_list[id_next]['damage_result']):
+                    id_next += 1
+                else:
+                    break
+            
+            if id_next not in range(len(flatten_list)):
+                continue
+                
+            print('id check : ',id,id_next,flatten_list[id]['view'],flatten_list[id_next]['view'])
+
+            flatten_list[id],flatten_list[id_next] = scracth_cross_check.cross_check(flatten_list[id],flatten_list[id_next])
+        
+        damaged_by_frame = {}
+        for id in range(len(flatten_list)):
+            damaged_by_frame[flatten_list[id]['frame_id']] = flatten_list[id]['damage_result']
+
+        # cleaned_damaged_by_bin = damaged_by_bin
+        final_result = collect_final_result_after_cross_check(damaged_by_frame)
         print(final_result)
 
         # save final result
         with open(out_path+'/'+name+'_damges_by_frame_v2.json', 'w', encoding='utf-8') as f:
-            json.dump({'damaged_bin':cleaned_damaged_by_bin,'result':final_result}, f, ensure_ascii=False, indent=4)
+            json.dump({'damaged_bin':damaged_by_frame,'result':final_result}, f, ensure_ascii=False, indent=4)
         
         
         
