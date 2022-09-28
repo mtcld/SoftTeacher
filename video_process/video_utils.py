@@ -1,5 +1,6 @@
 import cv2
-import torch
+# import torch
+import math as m
 
 def filter_carpart_by_view(info):
     def check_wrong_carpart_view(carpart_label,view):
@@ -10,6 +11,12 @@ def filter_carpart_by_view(info):
             return False
 
         if carpart_label == 'tail_gate+b' and (view < 135 or view > 225):
+            return False
+        
+        if carpart_label in ['door+lf','door+lb'] and (view < 180):
+            return False
+        
+        if carpart_label in ['door+rf','door+rb'] and (view > 180) : 
             return False
 
         return True

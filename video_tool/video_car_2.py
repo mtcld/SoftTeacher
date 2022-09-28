@@ -20,7 +20,7 @@ import pandas as pd
 from pathlib import Path 
 import os
 import glob
-import math as m
+# import math as m
 from video_process.Hungarian_matching import Hungarian
 from video_process.Cross_checking import Cross_check_pair
 from video_process.EMA import EMA
@@ -201,7 +201,7 @@ def main():
 
     # video_files = glob.glob('video/video_2/*.MOV')
     # video_files=['video/IMG_5424.MOV','video/20220504_142734.mp4','video/IMG_5959.MOV','video/video_2/FBAI_Car_01.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
-    video_files = glob.glob('video/video_test/FBAI_Car_01.MOV')
+    video_files = glob.glob('video/video_test/*')
     # video_files = ['video/IMG_5424.MOV','video/IMG_5959.MOV','video/IMG_5942.MOV','video/IMG_5435.MOV','video/IMG_5946.MOV','video/video_2/FBAI_Car_05.MOV']
     # video_files = ['video/20220504_142734.mp4']
     # video_files = glob.glob('video_tool/demo_6.avi')
@@ -213,6 +213,9 @@ def main():
 
         name = os.path.basename(file)
         name = name[:name.rfind('.')]
+
+        if name in ['20220504_142734','FBAI_Car_01','FBAI_Car_05','IMG_5435','IMG_5942','IMG_5946','IMG_5959']:
+            continue
 
         images_video_path = out_path+'/'+name+'_bin_'+str(bin_length)
         # os.system('rm -rf '+images_video_path)
