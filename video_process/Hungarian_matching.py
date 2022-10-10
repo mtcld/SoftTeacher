@@ -5,6 +5,7 @@ from scipy.optimize import linear_sum_assignment
 import torch 
 import numpy as np
 import json
+import copy
 
 def iou_loss(boxes1: torch.Tensor,boxes2: torch.Tensor):
 
@@ -64,7 +65,7 @@ class Hungarian():
         self.count_frame = 0
         self.cache = {}
         self.history = {}
-        self.threshold = 4
+        self.threshold = 5
 
     def normalize(self,box):
         xyxy = np.array([box[0],box[2]]).reshape(-1)
@@ -257,7 +258,7 @@ class Hungarian():
                 else:
                     print('debug hungarian : ',self.count_frame, self.cache[cache_label][0])
                     count_check = self.count_frame - self.cache[cache_label][0]
-                    if count_check <= 1 :
+                    if count_check == 1 or count_check == 0:
                         self.cache[cache_label]=[self.count_frame,self.cache[cache_label][1]+1,self.cache[cache_label][2]+count_check]
                         # self.cache[cache_label][0] = self.count_frame
                         # self.cache[cache_label].insert(1,self.cache[cache_label][1]+1)
@@ -268,18 +269,23 @@ class Hungarian():
 
                 with open('video_tool/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
                     json.dump(self.cache, f, ensure_ascii=False, indent=4)
-                
+
                 if self.cache[cache_label][1] >= self.threshold :
                     # modify view_dict to reverse change
                     # try to reserver all the wrong label cause by wrong tracking infomation
                     # frame_ids = list(self.history.keys())
+                    origin_id = -1 
+                    check_del_cache = False
                     for i in range(1,self.threshold):
                         curr_id = view_id - i
-                        print('trying to reverse .........',curr_id,view_dict[curr_id]['frame_id'])
+                        print('trying to reverse .........',curr_id,' count check : ',self.cache[cache_label][2])
+                        #,view_dict[curr_id]['frame_id']
 
-                        if self.cache[cache_label][2] <= 1 :
-                            for rc in self.history[9]:
+                        if self.cache[cache_label][2] <= 1 : 
+                            max_key = max(self.history.keys())
+                            tmp = copy.deepcopy(self.history[max_key])
 
+                            for idrc,rc in enumerate(self.history[max_key]):
                                 if view_dict[curr_id]['frame_id'] != rc['frame_id'] :
                                     continue
                                     
@@ -293,33 +299,52 @@ class Hungarian():
                                     # print('cur label : ',view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']])
                                     view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] = detect_labels[r]
                                     origin_id = rc['index_track']
+
+                                    tmp.pop(idrc)
+                            
+                            if tmp != self.history[max_key]:
+                                self.history[max_key] = tmp
+                                check_del_cache = True
                         else:
-                            for rc in self.history[curr_id]:
+                            if curr_id in self.history.keys():
+                                tmp = copy.deepcopy(self.history[curr_id])
 
-                                if view_dict[curr_id]['frame_id'] != rc['frame_id'] :
-                                    continue
-                                    
-                                print('debug len view dict : ',len(view_dict))
-                                print('index : ',rc['index_detect'])
-                                print('len labels ', len(view_dict[curr_id]['result'][0]['carpart']['labels']))
+                                for idrc, rc in enumerate(self.history[curr_id]):
+                                    if view_dict[curr_id]['frame_id'] != rc['frame_id'] :
+                                        continue
+                                        
+                                    print('debug len view dict : ',len(view_dict))
+                                    print('index : ',rc['index_detect'])
+                                    print('len labels ', len(view_dict[curr_id]['result'][0]['carpart']['labels']))
 
-                                if view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] == track_labels[c]:
-                                    print('done 1 reverse ')
-                                    # print('record :',rc['detect'],rc['track'])
-                                    # print('cur label : ',view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']])
-                                    view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] = detect_labels[r]
-                                    origin_id = rc['index_track']
+                                    if view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] == track_labels[c]:
+                                        print('done 1 reverse ')
+                                        # print('record :',rc['detect'],rc['track'])
+                                        # print('cur label : ',view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']])
+                                        view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] = detect_labels[r]
+                                        origin_id = rc['index_track']
+
+                                        tmp.pop(idrc)
+                                if self.history[curr_id] != tmp :
+                                    self.history[curr_id] = tmp
+                                    check_del_cache = True
                     
                     # relabel the root of wrong tracking problem
                     # try :
-                    print('origin frame id ',view_dict[curr_id-1]['frame_id'])
-                    view_dict[curr_id-1]['result'][0]['carpart']['labels'][origin_id] = detect_labels[r]
+                    if origin_id != -1 :
+                        print('origin frame id ',view_dict[curr_id-1]['frame_id'],'origin id : ',origin_id, ' / ', len(view_dict[curr_id-1]['result'][0]['carpart']['labels']))
+                        try : 
+                            view_dict[curr_id-1]['result'][0]['carpart']['labels'][origin_id] = detect_labels[r]
+                        except : 
+                            print('cant be tracked to reversed...')
                     # except :
                     #     print('something wrong')
                     # reset cache 
 
                     # self.cache[cache_label]=[self.count_frame,1]
-                    self.cache[cache_label]=[0,0]
+                    # self.cache[cache_label]=[0,0]
+                    if check_del_cache:
+                        del self.cache[cache_label]
 
                     # self.cache[cache_label][0] = self.count_frame
                     # self.cache[cache_label].insert(1,1)

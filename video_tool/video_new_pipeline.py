@@ -8,6 +8,8 @@ from ssod.apis.inference import init_detector as st_init_detector
 import numpy as np
 import cv2
 import os
+import glob
+from video_process import Hungarian_matching
 
 from video_process.Hungarian_matching import Hungarian
 from video_process.matching import estimate_position
@@ -183,6 +185,8 @@ def get_label(label):
 
 def get_car_info(pred_json,car_info_dict_by_frame,frame_queue,hungarian,file_name):
     hungarian.reset_count_frame() 
+    # hungarian.reset_cache()
+
     tracking_flag = False
     roi_list = []
     view_dict_by_id = {}
@@ -209,7 +213,7 @@ def get_car_info(pred_json,car_info_dict_by_frame,frame_queue,hungarian,file_nam
         
         if not tracking_flag : 
             if frame_id in car_info_dict_by_frame.keys():
-                car_info = car_info_dict_by_frame[frame_id]
+                car_info = car_info_dict_by_frame[frame_id]['result']
             else: 
                 print('do inference car !!')
                 car_info = get_car_carpart_model_prediction(frame.copy())
@@ -242,7 +246,7 @@ def get_car_info(pred_json,car_info_dict_by_frame,frame_queue,hungarian,file_nam
     #update car_info_dict_by_frame
     for view_id, info in view_dict_by_id.items():
         # if info['frame_id'] not in car_info_dict_by_frame.keys():
-        car_info_dict_by_frame[info['frame_id']] = info['result']
+        car_info_dict_by_frame[info['frame_id']] = {'result':info['result'],'frame':info['frame']}
 
     pred_json[0]['car'] = car_info[0]['car']
     pred_json[0]['carpart'] = car_info[0]['carpart']
@@ -271,7 +275,7 @@ def evaluate_video(video_path):
         if ret != True:
             break
         
-        if frame_id % 2 == 0:
+        if frame_id % 6 == 0:
             result, car_info_flag = yolo_damage_inference(frame)
 
             if car_info_flag : 
@@ -282,7 +286,7 @@ def evaluate_video(video_path):
                 result = get_car_info(result, car_info_dict_by_frame,frame_queue,hungarian,name)
                 print('debug car info dict: ',len(car_info_dict_by_frame.keys()),' len frame queue : ',len(frame_queue.frame_id_list))
 
-            if frame_id % 4 == 0 : 
+            if frame_id % 3 == 0 : 
                 frame_queue.enqueue({'frame':frame,'frame_id':frame_id})
             
             cv2.imwrite('video_tool/debug_new_pipeline.jpg',draw_result(result,frame.copy()))
@@ -290,11 +294,17 @@ def evaluate_video(video_path):
             # pre_frame = frame.copy()
         frame_id += 1
     
+    video_writer = cv2.VideoWriter('video_tool/out-cp-demo-'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),5,(frame_w,frame_h))
 
+    for k,info in car_info_dict_by_frame.items():
+        image = draw_result(info['result'],info['frame'])
+        video_writer.write(image)
     return 
 
 def main():
-    evaluate_video('video_tool/demo.avi') 
+    video_files = glob.glob('video/video_test/*')
+    for video_file in video_files:
+        evaluate_video(video_file) 
 
 if __name__=='__main__':
     main()
