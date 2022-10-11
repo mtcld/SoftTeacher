@@ -16,6 +16,16 @@ from video_process.Hungarian_matching import Hungarian
 from video_process.matching import estimate_position
 from video_process.carpart.segment import CarpartInfo
 from video_process.EMA import EMA
+from video_process.video_utils import compare_masks, filter_carpart_by_view, collect_final_result_after_cross_check
+from video_process.Cross_checking import Cross_check_pair
+from video_process.damage import Damage
+from video_process.damage.scratch import Scratch
+from video_process.damage.dent import Dent
+
+damage_filter = Damage()
+damage_filter = Dent(damage_filter)
+damage_filter = Scratch(damage_filter)
+
 # from video_process.damage import scratch
 
 cp_model = init_detector('checkpoint/carpart_rear_exp_2/carpart_rear.py',
@@ -305,7 +315,7 @@ def verify_car_info_dict(car_info_dict_by_frame,hungarian):
 
     for view_id, info in view_dict_by_id.items():
         # if info['frame_id'] not in car_info_dict_by_frame.keys():
-        car_info_dict_by_frame[info['frame_id']] = {'result':info['result'],'frame':info['frame']}
+        car_info_dict_by_frame[info['frame_id']] = {'result':info['result'],'frame':info['frame'],'frame_id':info['frame_id']}
 
     car_info_dict_by_frame = dict(sorted(car_info_dict_by_frame.items()))
 
@@ -318,6 +328,31 @@ def verify_car_info_dict(car_info_dict_by_frame,hungarian):
         car_info_dict_by_frame[frame_id]['view'] = views.add(frame_info['result']['carpart']['view'])
 
     return car_info_dict_by_frame
+
+def collect_result(car_info_dict_by_frame,hungarian):
+    # flatten dict by frame 
+    flatten_list = [info for _,info in car_info_dict_by_frame.items() if any([i in info['result'][0].keys() for i in ['dent','scratch']])]
+    print('debug flatten list : ', len(flatten_list))
+    flatten_list.sort(key=lambda x :x['frame_id'])
+
+    for id,info in enumerate(flatten_list):
+        # print(info['frame_id'], ' : ',info['view'])
+        result = info['result']
+        # image_out_name = 'bin_'+str(bin)+'_frame_'+str(info['view'])+'_'+str(info['frame_id'])+'.jpg'
+        # cv2.imwrite(images_video_path+'/'+image_out_name,info['frame'])
+        result, damage_result = compare_masks(info['frame'],damage_filter,result[0])
+
+        flatten_list[id]['result'] = result
+        flatten_list[id]['damage_result'] = damage_result
+
+    scratch_cross_check = Cross_check_pair(hungarian)
+
+    print('cross checking scratch damage ...')
+
+    for id in range(len(flatten_list)):
+        if not bool(flatten_list[id]['damage_result']):
+            continue
+    return 
 
 def evaluate_video(video_path):
     name = os.path.basename(video_path)
@@ -374,6 +409,8 @@ def evaluate_video(video_path):
     
     with open('video_tool/view_dict.json', 'w', encoding='utf-8') as f:
         json.dump(view_info, f, ensure_ascii=False, indent=4)
+
+    
     return 
 
 def main():
