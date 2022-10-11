@@ -148,7 +148,7 @@ class Hungarian():
                         self.cache[cache_label][0] = self.count_frame
                         self.cache[cache_label].insert(1,1)
 
-                with open('video_tool/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
+                with open('video_tool/cache/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
                     json.dump(self.cache, f, ensure_ascii=False, indent=4)
                 
                 if self.cache[cache_label][1] >= self.threshold :
@@ -185,7 +185,7 @@ class Hungarian():
                 else:
                     self.history[view_id].append(record)
 
-                with open('video_tool/history-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
+                with open('video_tool/history/history-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
                     json.dump(self.history, f, ensure_ascii=False, indent=4)
 
                 check_relabel_flag = True
@@ -267,7 +267,7 @@ class Hungarian():
                         # self.cache[cache_label][0] = self.count_frame
                         # self.cache[cache_label].insert(1,1)
 
-                with open('video_tool/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
+                with open('video_tool/cache/cache-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
                     json.dump(self.cache, f, ensure_ascii=False, indent=4)
 
                 if self.cache[cache_label][1] >= self.threshold :
@@ -283,8 +283,8 @@ class Hungarian():
 
                         if self.cache[cache_label][2] <= 1 : 
                             max_key = max(self.history.keys())
-                            tmp = copy.deepcopy(self.history[max_key])
-
+                            # tmp = copy.deepcopy(self.history[max_key])
+                            clean_id = []
                             for idrc,rc in enumerate(self.history[max_key]):
                                 if view_dict[curr_id]['frame_id'] != rc['frame_id'] :
                                     continue
@@ -299,16 +299,16 @@ class Hungarian():
                                     # print('cur label : ',view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']])
                                     view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] = detect_labels[r]
                                     origin_id = rc['index_track']
-
-                                    tmp.pop(idrc)
+                                    
+                                    clean_id.append(idrc)
                             
-                            if tmp != self.history[max_key]:
-                                self.history[max_key] = tmp
+                            if len(clean_id) != 0:
+                                self.history[max_key] = np.delete(np.array(self.history[max_key]),clean_id).tolist()
                                 check_del_cache = True
                         else:
                             if curr_id in self.history.keys():
-                                tmp = copy.deepcopy(self.history[curr_id])
-
+                                # tmp = np.array(copy.deepcopy(self.history[curr_id]))
+                                clean_id = []
                                 for idrc, rc in enumerate(self.history[curr_id]):
                                     if view_dict[curr_id]['frame_id'] != rc['frame_id'] :
                                         continue
@@ -323,10 +323,12 @@ class Hungarian():
                                         # print('cur label : ',view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']])
                                         view_dict[curr_id]['result'][0]['carpart']['labels'][rc['index_detect']] = detect_labels[r]
                                         origin_id = rc['index_track']
-
-                                        tmp.pop(idrc)
-                                if self.history[curr_id] != tmp :
-                                    self.history[curr_id] = tmp
+                                        
+                                        clean_id.append(idrc)
+                                        # tmp.pop(idrc)
+                                # np.delete()
+                                if len(clean_id) != 0 :
+                                    self.history[curr_id] = np.delete(np.array(self.history[curr_id]),clean_id).tolist()
                                     check_del_cache = True
                     
                     # relabel the root of wrong tracking problem
@@ -360,7 +362,7 @@ class Hungarian():
                 else:
                     self.history[view_id].append(record)
 
-                with open('video_tool/history-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
+                with open('video_tool/history/history-data-'+file_name+'.json', 'w', encoding='utf-8') as f:
                     json.dump(self.history, f, ensure_ascii=False, indent=4)
 
                 check_relabel_flag = True
@@ -370,6 +372,68 @@ class Hungarian():
                 # print('debug pred_json : ',pred_json[0]['carpart']['labels'][detect_ind[r]])
 
         return detect_info, pred_json, check_relabel_flag, view_dict
+
+    def bipartite_matching_v3(self, track_info, detect_info, pred_json):
+        # base on tracking of previous frame + detect of current frame -> relabel current detection -> output new roi list and pred_json
+        self.count_frame += 1
+
+        track_labels = []
+        track_boxes = []
+        track_ind = []
+
+        for label,box,idx in track_info:
+            track_labels.append(label)
+            track_boxes.append(self.normalize(box))
+            track_ind.append(idx)
+        
+        detect_labels = []
+        detect_boxes = []
+        detect_ind = []
+
+        for label, box, idx in detect_info:
+            detect_labels.append(label)
+            detect_boxes.append(self.normalize(box))
+            detect_ind.append(idx)
+        
+        if len(detect_boxes) == 0 or len(track_boxes) == 0:
+            return detect_info, pred_json, False
+        
+        cost_global = []
+        
+        for idx,dbox in enumerate(detect_boxes):
+            row_cost = []
+            for idy,tbox in enumerate(track_boxes):
+                row_cost.append(loss(detect_labels[idx],dbox,track_labels[idy],tbox))
+            cost_global.append(row_cost)
+        
+        cost_global = np.array(cost_global)
+        cost_global = np.pad(cost_global,[(0,int(cost_global.shape[0]<cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1])),
+                                        (0,int(cost_global.shape[0]>cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1]))],
+                                        'constant',constant_values=(10,))
+
+        row_ind,col_ind = linear_sum_assignment(cost_global)
+
+        check_relabel_flag = False
+
+        for r,c in zip(row_ind,col_ind):
+            if r >= len(detect_labels) or c >= len(track_labels):
+                continue
+            
+            if cost_global[r,c] < 0.5:
+                if self.get_label_carpart(detect_info[r][0]) != self.get_label_carpart(track_labels[c]) and cost_global[r,c] > 0.38 :
+                    continue
+
+                if detect_labels[r] == track_labels[c]:
+                    continue
+                
+                detect_info[r][0] = track_labels[c]
+                pred_json[0]['carpart']['labels'][detect_ind[r]] = track_labels[c]
+
+                check_relabel_flag = True
+
+                print('relabel : ',detect_labels[r], track_labels[c],cost_global[r][c])
+
+        return detect_info, pred_json, check_relabel_flag
 
     def matching_points(self,points1,points2):
         def normalize_point(p):
@@ -390,7 +454,7 @@ class Hungarian():
 
         ## can reduce padding axis to reduce runtime
         # cost_global = np.pad(cost_global,[(0,int(cost_global.shape[0]<cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1])),
-        #                                 (0,int(cost_global.shape[0]>cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1]))],
+        #                                 (0,(cost_global.shape[0]>cost_global.shape[1])*abs(cost_global.shape[0]-cost_global.shape[1]))],
         #                                 'constant',constant_values=(10,))
         
         row_ind,col_ind = linear_sum_assignment(cost_global)

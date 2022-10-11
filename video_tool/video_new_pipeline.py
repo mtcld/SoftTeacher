@@ -253,6 +253,49 @@ def get_car_info(pred_json,car_info_dict_by_frame,frame_queue,hungarian,file_nam
     
     return pred_json
 
+def verify_car_info_dict(car_info_dict_by_frame,hungarian):
+    car_info_dict_by_frame = dict(sorted(car_info_dict_by_frame.items(),reverse=True))
+    tracking_flag = False
+    roi_list = []
+
+    track_label_list = ['door','fender','quarter_panel','tail_light','head_light','front_bumper','rear_bumper','mirror']
+
+    for frame_id, frame_info in car_info_dict_by_frame.items():
+        frame = frame_info['frame']
+        car_info = frame_info['result']
+
+        tracking_info = []
+        if tracking_flag : 
+            for roi_data in roi_list:
+                dst = estimate_position(pre_frame,frame,roi_data[1])
+
+                if dst is None:
+                    continue
+                
+                roi_estimate_info = [roi_data[0],np.array(dst).reshape(-1,2).tolist(),roi_data[2]]
+                tracking_info.append(roi_estimate_info)
+            
+            tracking_flag = False
+        
+        if not tracking_flag:
+            roi_list = []
+
+            for idx,b in enumerate(car_info[0]['carpart']['bboxes']):
+                label_carpart = get_label(car_info[0]['carpart']['labels'][idx])
+                if any([i in label_carpart for i in track_label_list]):
+                    roi = [[int(b[0]),int(b[1])],[int(b[2]),int(b[1])],[int(b[2]),int(b[3])],[int(b[0]),int(b[3])]]
+                    roi_list.append([car_info[0]['carpart']['labels'][idx],roi,idx])
+                    tracking_flag = True
+
+            roi_list, car_info, _ = hungarian.bipartite_matching_v3(tracking_info,roi_list,car_info)
+            car_info_dict_by_frame[frame_id]['result'] = car_info
+
+        pre_frame = frame.copy()
+
+    car_info_dict_by_frame = dict(sorted(car_info_dict_by_frame.items()))
+
+    return car_info_dict_by_frame
+
 def evaluate_video(video_path):
     name = os.path.basename(video_path)
     name = name[:name.rfind('.')]
@@ -295,6 +338,8 @@ def evaluate_video(video_path):
         frame_id += 1
     
     video_writer = cv2.VideoWriter('video_tool/out-cp-demo-'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),5,(frame_w,frame_h))
+
+    car_info_dict_by_frame = verify_car_info_dict(car_info_dict_by_frame,hungarian)
 
     for k,info in car_info_dict_by_frame.items():
         image = draw_result(info['result'],info['frame'])
