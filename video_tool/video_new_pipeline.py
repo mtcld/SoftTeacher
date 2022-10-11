@@ -9,11 +9,13 @@ import numpy as np
 import cv2
 import os
 import glob
-from video_process import Hungarian_matching
+# from video_process import Hungarian_matching
+import json
 
 from video_process.Hungarian_matching import Hungarian
 from video_process.matching import estimate_position
 from video_process.carpart.segment import CarpartInfo
+from video_process.EMA import EMA
 # from video_process.damage import scratch
 
 cp_model = init_detector('checkpoint/carpart_rear_exp_2/carpart_rear.py',
@@ -254,9 +256,13 @@ def get_car_info(pred_json,car_info_dict_by_frame,frame_queue,hungarian,file_nam
     return pred_json
 
 def verify_car_info_dict(car_info_dict_by_frame,hungarian):
+    hungarian.reset_cache()
     car_info_dict_by_frame = dict(sorted(car_info_dict_by_frame.items(),reverse=True))
     tracking_flag = False
     roi_list = []
+
+    view_dict_by_id = {}
+    view_id = 0
 
     track_label_list = ['door','fender','quarter_panel','tail_light','head_light','front_bumper','rear_bumper','mirror']
 
@@ -287,12 +293,29 @@ def verify_car_info_dict(car_info_dict_by_frame,hungarian):
                     roi_list.append([car_info[0]['carpart']['labels'][idx],roi,idx])
                     tracking_flag = True
 
-            roi_list, car_info, _ = hungarian.bipartite_matching_v3(tracking_info,roi_list,car_info)
+            roi_list, car_info, _ ,view_dict_by_id= hungarian.bipartite_matching(tracking_info,roi_list,car_info,view_dict_by_id,view_id,'verify')
+            
+            view_info = {'frame_id':frame_id,'frame':frame,'result':car_info}
+            view_dict_by_id[view_id] = view_info
+            view_id += 1
+            
             car_info_dict_by_frame[frame_id]['result'] = car_info
 
         pre_frame = frame.copy()
 
+    for view_id, info in view_dict_by_id.items():
+        # if info['frame_id'] not in car_info_dict_by_frame.keys():
+        car_info_dict_by_frame[info['frame_id']] = {'result':info['result'],'frame':info['frame']}
+
     car_info_dict_by_frame = dict(sorted(car_info_dict_by_frame.items()))
+
+    views = EMA(span = 10)
+
+    for frame_id, frame_info in car_info_dict_by_frame.items():
+        if frame_info['result']['carpart']['view'] is None:
+            car_info_dict_by_frame[frame_id]['view'] = 'None'
+            continue
+        car_info_dict_by_frame[frame_id]['view'] = views.add(frame_info['result']['carpart']['view'])
 
     return car_info_dict_by_frame
 
@@ -327,6 +350,7 @@ def evaluate_video(video_path):
                 # run inference on framequeue
                 # ...
                 result = get_car_info(result, car_info_dict_by_frame,frame_queue,hungarian,name)
+                car_info_dict_by_frame[frame_id]['result'] = result
                 print('debug car info dict: ',len(car_info_dict_by_frame.keys()),' len frame queue : ',len(frame_queue.frame_id_list))
 
             if frame_id % 3 == 0 : 
@@ -341,13 +365,19 @@ def evaluate_video(video_path):
 
     car_info_dict_by_frame = verify_car_info_dict(car_info_dict_by_frame,hungarian)
 
+    view_info = {}
+
     for k,info in car_info_dict_by_frame.items():
+        view_info[k] = str(info['result'][0]['carpart']['view'])
         image = draw_result(info['result'],info['frame'])
         video_writer.write(image)
+    
+    with open('video_tool/view_dict.json', 'w', encoding='utf-8') as f:
+        json.dump(view_info, f, ensure_ascii=False, indent=4)
     return 
 
 def main():
-    video_files = glob.glob('video/video_test/*')
+    video_files = glob.glob('video/video_test/IMG_5959.MOV')
     for video_file in video_files:
         evaluate_video(video_file) 
 

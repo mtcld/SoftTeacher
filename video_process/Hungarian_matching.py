@@ -77,6 +77,10 @@ class Hungarian():
     
     def reset_count_frame(self):
         self.count_frame = 0
+    
+    def reset_cache(self):
+        self.cache = {}
+        self.history = {}
 
     def bipartite_matching(self,track_info, detect_info,pred_json,view_dict,view_id,file_name):
         # base on tracking of previous frame + detect of current frame -> relabel current detection -> output new roi list and pred_json
