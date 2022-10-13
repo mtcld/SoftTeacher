@@ -11,6 +11,7 @@ import os
 import glob
 # from video_process import Hungarian_matching
 import json
+from pathlib import Path
 
 from video_process.Hungarian_matching import Hungarian
 from video_process.matching import estimate_position
@@ -322,21 +323,21 @@ def verify_car_info_dict(car_info_dict_by_frame,hungarian):
     views = EMA(span = 10)
 
     for frame_id, frame_info in car_info_dict_by_frame.items():
-        if frame_info['result']['carpart']['view'] is None:
+        if frame_info['result'][0]['carpart']['view'] is None:
             car_info_dict_by_frame[frame_id]['view'] = 'None'
             continue
-        car_info_dict_by_frame[frame_id]['view'] = views.add(frame_info['result']['carpart']['view'])
+        car_info_dict_by_frame[frame_id]['view'] = views.add(frame_info['result'][0]['carpart']['view'])
 
     return car_info_dict_by_frame
 
-def collect_result(car_info_dict_by_frame,hungarian):
+def collect_result(car_info_dict_by_frame,hungarian,file_name):
     # flatten dict by frame 
     flatten_list = [info for _,info in car_info_dict_by_frame.items() if any([i in info['result'][0].keys() for i in ['dent','scratch']])]
     print('debug flatten list : ', len(flatten_list))
     flatten_list.sort(key=lambda x :x['frame_id'])
 
     for id,info in enumerate(flatten_list):
-        # print(info['frame_id'], ' : ',info['view'])
+        print(info['frame_id'], ' : ',info['view'])
         result = info['result']
         # image_out_name = 'bin_'+str(bin)+'_frame_'+str(info['view'])+'_'+str(info['frame_id'])+'.jpg'
         # cv2.imwrite(images_video_path+'/'+image_out_name,info['frame'])
@@ -344,6 +345,7 @@ def collect_result(car_info_dict_by_frame,hungarian):
 
         flatten_list[id]['result'] = result
         flatten_list[id]['damage_result'] = damage_result
+        print('debug damage result : ',damage_result)
 
     scratch_cross_check = Cross_check_pair(hungarian)
 
@@ -352,6 +354,65 @@ def collect_result(car_info_dict_by_frame,hungarian):
     for id in range(len(flatten_list)):
         if not bool(flatten_list[id]['damage_result']):
             continue
+        
+        id_next = id + 1
+
+        for idx in range(id_next,len(flatten_list)):
+            if not bool(flatten_list[id_next]['damage_result']):
+                id_next += 1
+            else:
+                break
+        
+        if id_next not in range(len(flatten_list)):
+            continue
+            
+        print(' check pair id : ',id, id_next)
+        flatten_list[id], flatten_list[id_next] = scratch_cross_check.cross_check(flatten_list[id],flatten_list[id_next])
+
+    for id in range(len(flatten_list)):
+        filter_carpart_by_view(flatten_list[id])  
+    
+    damages_by_frame = {}
+
+    for id in range(len(flatten_list)):
+        damages_by_frame[str(flatten_list[id]['frame_id'])+'_'+str(flatten_list[id]['view'])] = flatten_list[id]['damage_result']
+        # print(flatten_list[id]['damage_result'])
+    
+    final_result = collect_final_result_after_cross_check(damages_by_frame)
+
+    print(final_result)
+    with open('video_out_new_pipeline/'+file_name+'.json', 'w', encoding='utf-8') as f:
+        json.dump({'damaged_bin':damages_by_frame,'result':final_result}, f, ensure_ascii=False, indent=4)
+
+    Path('video_out_new_pipeline/'+file_name+'/output').mkdir(parents=True,exist_ok=True)
+    for info in flatten_list:
+        draw_img = info['frame']
+        cv2.imwrite('video_out_new_pipeline/'+file_name+'/'+str(info['frame_id'])+'.jpg',draw_img)
+        # print('*'*10)
+        for cp_label,damage_list in info['damage_result'].items():
+            for damage in damage_list:
+                if damage[0] != 'scratch':
+                    clr = (255,0,0)
+                else:
+                    clr = (0,0,255)
+
+                if not damage[-1] and damage[0]=='scratch':
+                    # print('skip : ',cp_label)
+                    continue
+
+                # damage_mask = info['result'][damage[0]]['masks'][damage[2]].astype(bool)
+                damage_box = info['result'][damage[0]]['bboxes'][damage[2]]
+                cp_box = info['result']['carpart']['bboxes'][damage[3]]
+                # print(cp_label,cp_box,damage_box)
+
+                # draw_img[damage_mask] = draw_img[damage_mask]*0.5 + np.array([255,0,0])*0.5
+                cv2.rectangle(draw_img,(damage_box[0],damage_box[1]),(damage_box[2],damage_box[3]),clr,2)
+
+                cv2.rectangle(draw_img,(cp_box[0],cp_box[1]),(cp_box[2],cp_box[3]),(0,255,0),10)
+                cv2.putText(draw_img,cp_label,(cp_box[0],cp_box[3]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(0,255,0),thickness=2)
+        
+        cv2.imwrite('video_out_new_pipeline/'+file_name+'/output'+'/'+str(info['frame_id'])+'.jpg',draw_img)
+
     return 
 
 def evaluate_video(video_path):
@@ -368,15 +429,13 @@ def evaluate_video(video_path):
     frame_queue = FrameQueue()
     car_info_dict_by_frame = {}
 
-    skip = 0
-
     while cap.isOpened():
         ret, frame = cap.read()
 
         if ret != True:
             break
         
-        if frame_id % 6 == 0:
+        if frame_id % 5 == 0:
             result, car_info_flag = yolo_damage_inference(frame)
 
             if car_info_flag : 
@@ -388,33 +447,34 @@ def evaluate_video(video_path):
                 car_info_dict_by_frame[frame_id]['result'] = result
                 print('debug car info dict: ',len(car_info_dict_by_frame.keys()),' len frame queue : ',len(frame_queue.frame_id_list))
 
-            if frame_id % 3 == 0 : 
-                frame_queue.enqueue({'frame':frame,'frame_id':frame_id})
+            # if frame_id % 3 == 0 : 
+            frame_queue.enqueue({'frame':frame,'frame_id':frame_id})
             
             cv2.imwrite('video_tool/debug_new_pipeline.jpg',draw_result(result,frame.copy()))
 
-            # pre_frame = frame.copy()
         frame_id += 1
     
-    video_writer = cv2.VideoWriter('video_tool/out-cp-demo-'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),5,(frame_w,frame_h))
 
     car_info_dict_by_frame = verify_car_info_dict(car_info_dict_by_frame,hungarian)
 
     view_info = {}
 
-    for k,info in car_info_dict_by_frame.items():
-        view_info[k] = str(info['result'][0]['carpart']['view'])
-        image = draw_result(info['result'],info['frame'])
-        video_writer.write(image)
+    # video_writer = cv2.VideoWriter('video_tool/out-cp-demo-'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),5,(frame_w,frame_h))
+
+    # for k,info in car_info_dict_by_frame.items():
+    #     view_info[k] = str(info['result'][0]['carpart']['view'])
+    #     image = draw_result(info['result'],info['frame'])
+    #     video_writer.write(image)
     
     with open('video_tool/view_dict.json', 'w', encoding='utf-8') as f:
         json.dump(view_info, f, ensure_ascii=False, indent=4)
 
+    collect_result(car_info_dict_by_frame,hungarian,name)
     
     return 
 
 def main():
-    video_files = glob.glob('video/video_test/IMG_5959.MOV')
+    video_files = glob.glob('video/video_test/*')
     for video_file in video_files:
         evaluate_video(video_file) 
 

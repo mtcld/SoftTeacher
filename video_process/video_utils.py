@@ -50,7 +50,7 @@ def collect_final_result_after_cross_check(damaged_by_bin_json):
         for cp, damages in value.items():
             for d in damages:
                 if d[0] == 'scratch':
-                    if d[1] > 0.61 and (d[-1] or any([i in cp for i in ['mirror', 'rocker_panel', 'hood']])):
+                    if d[1] > 0.52 and (d[-1] or any([i in cp for i in ['mirror', 'rocker_panel', 'hood']])):
                         label = cp+'_'+d[0]
                         if label not in confirm:
                             confirm[label] = 1
@@ -63,14 +63,15 @@ def collect_final_result_after_cross_check(damaged_by_bin_json):
                     #         confirm2[label] = 1
                     #     else:
                     #         confirm2[label] += 1
-                else:
+                elif d[0] == 'dent':
+                    if d[1] > 0.47 :
                     # if id % 3 == 0:
                     #     continue
-                    label = cp+'_'+d[0]
-                    if label not in confirm:
-                        confirm[label] = 1
-                    else:
-                        confirm[label] += 1
+                        label = cp+'_'+d[0]
+                        if label not in confirm:
+                            confirm[label] = 1
+                        else:
+                            confirm[label] += 1
 
     # print('uncheck result  : ',len(confirm2.values()),confirm2)
 
@@ -161,6 +162,7 @@ def compare_masks(image, damage, pred_json):
 
     carpart_info = pred_json['carpart']
     if len(carpart_info['labels']) == 0 or (len(carpart_info['labels']) > 2 and ('c_90_90' in carpart_info['totaled_info']['view_img'] or 'c_90_270' in carpart_info['totaled_info']['view_img'])):
+        print('maybe it happen here !!!!')
         return pred_json, final_output
 
     pred_json, final_output = damage.get_damage2carpart(
