@@ -101,11 +101,11 @@ class Cross_check_pair():
 
         return self.kp1[valid],self.kp2[valid]
 
-    def make_coordinate(self,mask1,mask2,space=20):
+    def make_coordinate(self,mask1,mask2,space=25):
         # print('debug mask shape : ',mask1.shape,mask2.shape)
         kp1,kp2 = self.filter_keypoints_by_carpart(mask1,mask2)
 
-        if len(kp1) < 20:
+        if len(kp1) < space:
             return kp1,kp2
         
         kmean = KMeans(n_clusters=space,max_iter=50).fit(kp1)
@@ -168,11 +168,11 @@ class Cross_check_pair():
 
             es_scratch_list1 = self.estimate_bbox2(scratch_list1)
 
-            for b in scratch_list1:
-                cv2.rectangle(self.draw1,(b[0],b[1]),(b[2],b[3]),(0,0,255),2)
+            # for b in scratch_list1:
+            #     cv2.rectangle(self.draw1,(b[0],b[1]),(b[2],b[3]),(0,0,255),2)
             
-            for b in es_scratch_list1:
-                cv2.rectangle(self.draw2,(b[0],b[1]),(b[2],b[3]),(255,0,255),2)
+            # for b in es_scratch_list1:
+            #     cv2.rectangle(self.draw2,(b[0],b[1]),(b[2],b[3]),(255,0,255),2)
 
 
             carpart_mask1 = self.info1['result']['carpart']['masks'][damage_list1[ind_list1[0]][3]]
@@ -204,8 +204,8 @@ class Cross_check_pair():
             
                 self.info1,self.info2 = self.hungarian.matching_damages(carpart_label1,es_scratch_list1,ind_list1,coord_list1,self.info1,scratch_list2,ind_list2,coord_list2,self.info2)
 
-                for b in scratch_list2:
-                    cv2.rectangle(self.draw2,(b[0],b[1]),(b[2],b[3]),(0,0,255),2)
+                # for b in scratch_list2:
+                #     cv2.rectangle(self.draw2,(b[0],b[1]),(b[2],b[3]),(0,0,255),2)
             # print('*'*200)  
             # cv2.imwrite('demo2.jpg',self.draw2)
             # cv2.imwrite('demo1.jpg',self.draw1)
