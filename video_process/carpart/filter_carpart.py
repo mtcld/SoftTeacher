@@ -1,3 +1,4 @@
+from cProfile import label
 import cv2
 import numpy as np
 
@@ -355,6 +356,28 @@ def filter_carpart(pred_json):
     merge_carpart(carpart_pred['labels'],carpart_pred['masks'],carpart_pred['scores'],carpart_pred['bboxes'])
     filter_by_missing(pred_json)
     correct_labels(pred_json)
+
+def correct_quarter_panel_base_fuel_tank_door(pred_json):
+    labels = pred_json['carpart']['labels']
+    masks = pred_json['carpart']['masks']
+
+    # if check_carpart_in_list('fuel_tank_door',labels) : 
+    for idx, label in enumerate(labels):
+        if label == 'fuel_tank_door':
+            x1,y1,x2,y2 = pred_json['carpart']['bboxes'][idx]
+            center = (int((y1+y2)/2),int((x1+x2)/2))
+
+            for idy,mask in enumerate(masks):
+                if mask[center] and labels[idy]=='fender+rf':
+                    pred_json['carpart']['labels'][idy]='qpa_quarter_panel+lb'
+                    print('change fender to quarter panel yolo !!')
+                    return pred_json
+                elif mask[center] and labels[idy]=='fender+lf':
+                    pred_json['carpart']['labels'][idy]='qpa_quarter_panel+rb'
+                    print('change fender to quarter panel yolo !!')
+                    return pred_json
+
+    return pred_json
 
 def check_one_door_car(labels):
     labels=[label1.split('+')[0] for label1 in labels]

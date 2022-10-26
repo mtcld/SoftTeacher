@@ -87,6 +87,11 @@ class CarpartInfo():
 
         for pred_json in pred_jsons:
             pred_json['carpart']['totaled_info']['carparts']= set(carparts)
+        
+        ## 
+        # TODO : add checking fuel tank door + fender check here
+        for pred_json in pred_jsons:
+            pred_json = correct_quarter_panel_base_fuel_tank_door(pred_json)
 
         return pred_jsons
 
