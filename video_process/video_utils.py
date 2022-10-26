@@ -50,7 +50,7 @@ def collect_final_result_after_cross_check(damaged_by_bin_json):
         for cp, damages in value.items():
             for d in damages:
                 if d[0] == 'scratch':
-                    if d[1] > 0.52 and (d[-1] or any([i in cp for i in ['mirror', 'rocker_panel', 'hood']])):
+                    if d[1] > 0.62 and (d[-1] or any([i in cp for i in ['mirror', 'rocker_panel', 'hood']])):
                         label = cp+'_'+d[0]
                         if label not in confirm:
                             confirm[label] = 1

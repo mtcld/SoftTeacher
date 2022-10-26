@@ -22,6 +22,7 @@ from video_process.Cross_checking import Cross_check_pair
 from video_process.damage import Damage
 from video_process.damage.scratch import Scratch
 from video_process.damage.dent import Dent
+from video_process.carpart.filter_carpart import correct_quarter_panel_base_fuel_tank_door
 
 damage_filter = Damage()
 damage_filter = Dent(damage_filter)
@@ -323,6 +324,7 @@ def verify_car_info_dict(car_info_dict_by_frame,hungarian):
     views = EMA(span = 10)
 
     for frame_id, frame_info in car_info_dict_by_frame.items():
+        # car_info_dict_by_frame[frame_id]['result'][0] = correct_quarter_panel_base_fuel_tank_door(frame_info['result'][0])
         if frame_info['result'][0]['carpart']['view'] is None:
             car_info_dict_by_frame[frame_id]['view'] = 'None'
             continue
@@ -386,8 +388,8 @@ def collect_result(car_info_dict_by_frame,hungarian,file_name):
 
     Path('video_out_new_pipeline/'+file_name+'/output').mkdir(parents=True,exist_ok=True)
     for info in flatten_list:
-        draw_img = info['frame']
-        cv2.imwrite('video_out_new_pipeline/'+file_name+'/'+str(info['frame_id'])+'.jpg',draw_img)
+        draw_img = info['frame'].copy()
+        cv2.imwrite('video_out_new_pipeline/'+file_name+'/'+str(info['frame_id'])+'.jpg',info['frame'])
         # print('*'*10)
         for cp_label,damage_list in info['damage_result'].items():
             for damage in damage_list:
@@ -396,9 +398,9 @@ def collect_result(car_info_dict_by_frame,hungarian,file_name):
                 else:
                     clr = (0,0,255)
 
-                if not damage[-1] and damage[0]=='scratch':
-                    # print('skip : ',cp_label)
-                    continue
+                # if not damage[-1] and damage[0]=='scratch':
+                #     # print('skip : ',cp_label)
+                #     continue
 
                 # damage_mask = info['result'][damage[0]]['masks'][damage[2]].astype(bool)
                 damage_box = info['result'][damage[0]]['bboxes'][damage[2]]
@@ -407,6 +409,9 @@ def collect_result(car_info_dict_by_frame,hungarian,file_name):
 
                 # draw_img[damage_mask] = draw_img[damage_mask]*0.5 + np.array([255,0,0])*0.5
                 cv2.rectangle(draw_img,(damage_box[0],damage_box[1]),(damage_box[2],damage_box[3]),clr,2)
+
+                if not damage[-1]:
+                    cv2.line(draw_img,(damage_box[0],damage_box[1]),(damage_box[2],damage_box[3]),clr,2)
 
                 cv2.rectangle(draw_img,(cp_box[0],cp_box[1]),(cp_box[2],cp_box[3]),(0,255,0),10)
                 cv2.putText(draw_img,cp_label,(cp_box[0],cp_box[3]),cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.9,color=(0,255,0),thickness=2)
@@ -459,12 +464,12 @@ def evaluate_video(video_path):
 
     view_info = {}
 
-    # video_writer = cv2.VideoWriter('video_tool/out-cp-demo-'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),5,(frame_w,frame_h))
+    video_writer = cv2.VideoWriter('video_tool/out-cp-demo-'+name+'.avi',cv2.VideoWriter_fourcc('M','J','P','G'),5,(frame_w,frame_h))
 
-    # for k,info in car_info_dict_by_frame.items():
-    #     view_info[k] = str(info['result'][0]['carpart']['view'])
-    #     image = draw_result(info['result'],info['frame'])
-    #     video_writer.write(image)
+    for k,info in car_info_dict_by_frame.items():
+        view_info[k] = str(info['result'][0]['carpart']['view'])
+        image = draw_result(info['result'],info['frame'])
+        video_writer.write(image)
     
     with open('video_tool/view_dict.json', 'w', encoding='utf-8') as f:
         json.dump(view_info, f, ensure_ascii=False, indent=4)
@@ -474,7 +479,7 @@ def evaluate_video(video_path):
     return 
 
 def main():
-    video_files = glob.glob('video/video_test/*')
+    video_files = glob.glob('video/video_test/20220728_123228.mp4')
     for video_file in video_files:
         evaluate_video(video_file) 
 
